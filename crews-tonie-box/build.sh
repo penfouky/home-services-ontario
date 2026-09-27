@@ -80,6 +80,7 @@ sign_bundle() {
         codesign --force --sign - --timestamp=none "$bundle"
         codesign --verify --deep --strict --verbose=1 "$bundle"
     elif command -v "${RCODESIGN:-rcodesign}" >/dev/null; then
+        # rcodesign takes RCODESIGN_* variables as settings; RCODESIGN itself (its path) is fine
         "${RCODESIGN:-rcodesign}" sign "$bundle"
     else
         echo "note: rcodesign is not installed, so the app bundle is not sealed (the programs in it are signed)" >&2

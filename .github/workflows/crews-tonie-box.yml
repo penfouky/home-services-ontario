@@ -13,8 +13,9 @@ permissions:
 env:
   DOTNET_CLI_TELEMETRY_OPTOUT: 1
   DOTNET_NOLOGO: 1
-  RCODESIGN_URL: https://github.com/indygreg/apple-platform-rs/releases/download/apple-codesign%2F0.29.0/apple-codesign-0.29.0-x86_64-unknown-linux-musl.tar.gz
-  RCODESIGN_SHA256: dbe85cedd8ee4217b64e9a0e4c2aef92ab8bcaaa41f20bde99781ff02e600002
+  # rcodesign reads every RCODESIGN_* variable as a setting, so these are named differently
+  APPLE_CODESIGN_URL: https://github.com/indygreg/apple-platform-rs/releases/download/apple-codesign%2F0.29.0/apple-codesign-0.29.0-x86_64-unknown-linux-musl.tar.gz
+  APPLE_CODESIGN_SHA256: dbe85cedd8ee4217b64e9a0e4c2aef92ab8bcaaa41f20bde99781ff02e600002
 
 jobs:
   # the Mac app is cross-built on Linux (the zip that gets handed out), and the Linux build runs all tests
@@ -36,8 +37,8 @@ jobs:
           sudo apt-get update -q
           sudo apt-get install -y -q sox lame opus-tools ffmpeg
           python -m pip install ziglang numpy
-          curl -fsSL "$RCODESIGN_URL" -o rcodesign.tgz
-          echo "$RCODESIGN_SHA256  rcodesign.tgz" | sha256sum -c
+          curl -fsSL "$APPLE_CODESIGN_URL" -o rcodesign.tgz
+          echo "$APPLE_CODESIGN_SHA256  rcodesign.tgz" | sha256sum -c
           mkdir -p "$RUNNER_TEMP/rcodesign" && tar xzf rcodesign.tgz -C "$RUNNER_TEMP/rcodesign" --strip-components=1
           echo "RCODESIGN=$RUNNER_TEMP/rcodesign/rcodesign" >> "$GITHUB_ENV"
           cd tests && npm install --no-save --no-package-lock playwright@1 && npx playwright install --with-deps chromium
