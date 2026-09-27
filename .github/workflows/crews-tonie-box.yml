@@ -153,7 +153,9 @@ jobs:
           kill "$pid"
           wait "$pid" || true
           grep -q "window opened" "$work/data/app.log"
-          grep -q "page connected: .*AppleWebKit" "$work/data/app.log"
+          # the page loaded in the real native window; Photino's macOS WKWebView reports its
+          # user agent as "Photino WebView" (a plain browser engine would say AppleWebKit)
+          grep -qE "page connected: .*(Photino|AppleWebKit)" "$work/data/app.log"
 
       - name: Build natively on the Mac (signed with codesign)
         run: ./build.sh osx-arm64
