@@ -186,7 +186,9 @@ function stage(tonie, { badge = false } = {}) {
   if (badge) node.append(el('span', { class: `badge badge-${tonie.kind} stage-badge`, text: info.badge }));
   const emojiFigure = () => el('div', { class: 'emoji-figure figure', style: { '--c': color }, text: tonie.emoji || info.emoji });
   if (tonie.image && !tonie.emoji) {
-    const img = el('img', { class: 'figure', alt: '', loading: 'lazy', src: `/api/image?url=${encodeURIComponent(tonie.image)}` });
+    /* a photo on this Mac (or a preview) is used as-is; a shop picture goes through our cache */
+    const local = /^(blob:|data:|\/)/.test(tonie.image);
+    const img = el('img', { class: 'figure', alt: '', loading: 'lazy', src: local ? tonie.image : `/api/image?url=${encodeURIComponent(tonie.image)}` });
     img.addEventListener('error', () => img.replaceWith(emojiFigure()));
     node.append(img);
   } else {
@@ -657,7 +659,11 @@ async function removeTonie(tonie) {
 }
 
 function renameTonie(tonie) {
-  const look = { title: tonie.title, emoji: tonie.emoji || '🧸', color: tonie.color || '#ffc94d' };
+  const hasPhoto = !!tonie.image && tonie.image.startsWith('/api/cover');
+  const look = {
+    title: tonie.title, emoji: tonie.emoji || '🧸', color: tonie.color || '#ffc94d',
+    usePhoto: hasPhoto, photoRef: hasPhoto ? 'keep' : null, previewUrl: hasPhoto ? tonie.image : null
+  };
   const titleInput = el('input', { class: 'input big', value: look.title, maxlength: 60 });
   const close = openLayer(dialog({
     title: 'Name & look',
@@ -667,7 +673,10 @@ function renameTonie(tonie) {
       el('button', { class: 'btn btn-ghost', onclick: () => close() }, 'Cancel'),
       el('button', {
         class: 'btn btn-primary', onclick: async () => {
-          await post(`/cards/${tonie.cardId}/tonies/${tonie.uid}/rename`, { title: titleInput.value.trim() || tonie.title, emoji: look.emoji, color: look.color });
+          await post(`/cards/${tonie.cardId}/tonies/${tonie.uid}/rename`, {
+            title: titleInput.value.trim() || tonie.title, emoji: look.emoji, color: look.color,
+            picture: look.usePhoto ? look.photoRef : ''
+          });
           close();
           closeLayer();
           pop();
@@ -679,25 +688,61 @@ function renameTonie(tonie) {
 
 /* ---------- emoji and color picker ---------- */
 
-const emojis = ['🧸', '🦄', '🐻', '🐰', '🦊', '🐶', '🐱', '🐼', '🦁', '🐯', '🐸', '🐧', '🐳', '🦖', '🐉', '🦋', '🐝', '🌈', '⭐', '🌙', '☀️', '🚀', '🚂', '🚒', '🏰', '🧚', '🧜‍♀️', '🦸', '🎈', '🎵', '📚', '🎂', '🍦', '🌻', '🐞', '👑'];
+const emojis = [
+  '🧸', '🦄', '🐻', '🐰', '🦊', '🐶', '🐱', '🐼', '🦁', '🐯', '🐨', '🐮', '🐷', '🐵', '🦉',
+  '🐢', '🐙', '🦈', '🐳', '🐬', '🦕', '🦖', '🐉', '🦋', '🐝', '🐞', '🐧', '🦜', '🦩', '🦔',
+  '🐸', '🐴', '🦓', '🦒', '🐘', '🌈', '⭐', '🌟', '🌙', '☀️', '☁️', '⛄', '🌻', '🌸', '🍄',
+  '🚀', '🛸', '✈️', '🚂', '🚒', '🚗', '⛵', '🏰', '🎪', '🎠', '🧚', '🧜‍♀️', '🧙', '🦸', '🦸‍♀️',
+  '🎈', '🎁', '🎵', '🥁', '🎸', '📚', '🎂', '🍦', '🍭', '👑', '💎', '❤️'];
 const palette = ['#ffc94d', '#ff6fae', '#7c5cff', '#58b8ff', '#22c09a', '#ff8a65', '#b388ff', '#8bd346'];
 
+/* look: { emoji, color, usePhoto, photoRef, previewUrl }
+   photoRef is an uploaded photo's id, or 'keep' for a photo the tonie already has */
 function lookPicker(look, onChange = () => {}) {
   const emojiGrid = el('div', { class: 'emoji-grid' });
   const colorRow = el('div', { class: 'color-row' });
+  const photoRow = el('div', { class: 'photo-row' });
+  const fileInput = el('input', { type: 'file', accept: 'image/png,image/jpeg,image/gif,image/webp', hidden: true });
+  fileInput.addEventListener('change', async () => {
+    const file = fileInput.files[0];
+    fileInput.value = '';
+    if (!file) return;
+    try {
+      const result = await api(`/covers/upload?name=${encodeURIComponent(file.name)}`, { method: 'PUT', raw: file });
+      if (look.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(look.previewUrl);
+      look.photoRef = result.id;
+      look.previewUrl = URL.createObjectURL(file);
+      look.usePhoto = true;
+      draw();
+      onChange();
+      pop();
+    } catch (error) {
+      toast(error.message, 'bad');
+    }
+  });
+  const pickEmoji = emoji => { look.emoji = emoji; look.usePhoto = false; draw(); onChange(); pop(); };
   const draw = () => {
     put(emojiGrid, ...emojis.map(e => el('button', {
-      class: e === look.emoji ? 'on' : '', type: 'button', 'aria-label': e, text: e,
-      onclick: () => { look.emoji = e; draw(); onChange(); pop(); }
+      class: !look.usePhoto && e === look.emoji ? 'on' : '', type: 'button', 'aria-label': e, text: e,
+      onclick: () => pickEmoji(e)
     })));
     put(colorRow, ...palette.map(c => el('button', {
       class: c === look.color ? 'on' : '', type: 'button', 'aria-label': `Color ${c}`, style: { background: c },
       onclick: () => { look.color = c; draw(); onChange(); }
     })));
+    put(photoRow,
+      look.previewUrl ? el('button', {
+        class: `photo-thumb ${look.usePhoto ? 'on' : ''}`, type: 'button', 'aria-label': 'Use this photo',
+        onclick: () => { look.usePhoto = true; draw(); onChange(); }
+      }, el('img', { src: look.previewUrl, alt: '' })) : null,
+      el('button', { class: 'btn btn-soft btn-small', type: 'button', onclick: () => fileInput.click() },
+        icon('file'), look.previewUrl ? 'Choose another photo' : 'Use your own photo'),
+      fileInput);
   };
   draw();
   return el('div', {},
     el('div', { class: 'field' }, el('label', { text: 'Pick a picture' }), emojiGrid),
+    el('div', { class: 'field' }, el('label', { text: 'or your own photo' }), photoRow),
     el('div', { class: 'field' }, el('label', { text: 'Pick a color' }), colorRow));
 }
 
@@ -781,13 +826,125 @@ function droppedFiles(transfer) {
   return entries.length ? Promise.all(entries.map(readEntry)).then(lists => lists.flat()) : Promise.resolve([...transfer.files]);
 }
 
+/* pick chapters out of tonies already on the card or shelf, to mix into a new tonie */
+async function openChapterPicker(onAdd) {
+  const current = card();
+  const body = el('div', {}, el('div', { class: 'empty' }, el('span', { class: 'spinner' })));
+  const close = openLayer(dialog({
+    title: 'Add from a tonie',
+    subtitle: 'Take chapters from tonies you already have and mix them into this one',
+    body,
+    foot: el('div', { class: 'right' }, el('button', { class: 'btn btn-primary', onclick: () => close() }, icon('check'), 'Done'))
+  }));
+
+  let shelf = [];
+  try {
+    shelf = await api('/shelf');
+  } catch (error) {
+    /* the shelf is a bonus here */
+  }
+  const sources = [
+    ...(current ? (state.tonies || []).filter(t => t.kind !== 'broken' && t.chapters > 0).map(t => ({
+      kind: t.kind, title: t.title, chapters: t.chapters, image: t.image, emoji: t.emoji, color: t.color, where: 'on the card',
+      detail: () => api(`/cards/${current.id}/tonies/${t.uid}`).then(d => ({ seconds: d.chapterSeconds || [], titles: d.tonie.chapterTitles || [] })),
+      stage: n => post(`/cards/${current.id}/tonies/${t.uid}/chapters/${n}/stage`)
+    })) : []),
+    ...shelf.filter(s => s.chapters > 0).map(s => ({
+      kind: s.kind || 'custom', title: s.title, chapters: s.chapters, image: s.image, emoji: s.emoji || '🧸', color: s.color, where: 'on your shelf',
+      detail: () => api(`/shelf/${s.id}`).then(d => ({ seconds: d.chapterSeconds || [], titles: d.chapterTitles || [] })),
+      stage: n => post(`/shelf/${s.id}/chapters/${n}/stage`)
+    }))
+  ];
+
+  if (!sources.length) {
+    put(body, el('div', { class: 'note info' }, icon('info'), 'There are no other tonies to take chapters from yet. Make one first, or add sounds from files.'));
+    return;
+  }
+
+  const list = el('div', { class: 'source-list' });
+  put(body, list);
+  list.append(...sources.map(source => {
+    const chapters = el('ol', { class: 'chapters', hidden: true });
+    const chev = el('span', { class: 'i chev', html: icons.next });
+    let loaded = false;
+    const addChapter = async (index, name, seconds, button) => {
+      button.disabled = true;
+      button.classList.add('loading');
+      try {
+        const staged = await source.stage(index);
+        onAdd([staged]);
+        put(button, icon('check'), 'Added');
+        pop();
+      } catch (error) {
+        button.disabled = false;
+        button.classList.remove('loading');
+        toast(error.message, 'bad');
+      }
+    };
+    const toggle = async () => {
+      if (!chapters.hidden) {
+        chapters.hidden = true;
+        chev.style.transform = '';
+        return;
+      }
+      chapters.hidden = false;
+      chev.style.transform = 'rotate(90deg)';
+      if (loaded) return;
+      loaded = true;
+      put(chapters, el('li', {}, el('span', { class: 'spinner' })));
+      try {
+        const { seconds, titles } = await source.detail();
+        const rows = [];
+        rows.push(el('li', { class: 'add-all' },
+          el('span', { class: 'name', text: 'All chapters' }),
+          el('button', {
+            class: 'btn btn-soft btn-small', onclick: async event => {
+              const button = event.currentTarget;
+              button.disabled = true;
+              for (let i = 0; i < source.chapters; i++) {
+                try {
+                  onAdd([await source.stage(i)]);
+                } catch (error) {
+                  toast(error.message, 'bad');
+                  break;
+                }
+              }
+              put(button, icon('check'), 'Added');
+              pop();
+            }
+          }, icon('plus'), 'Add all')));
+        for (let i = 0; i < source.chapters; i++) {
+          const name = titles[i] || `Chapter ${i + 1}`;
+          const button = el('button', { class: 'btn btn-soft btn-small' }, icon('plus'), 'Add');
+          button.addEventListener('click', () => addChapter(i, name, seconds[i], button));
+          rows.push(el('li', {},
+            el('span', { class: 'num', text: i + 1 }),
+            el('span', { class: 'name', text: name, title: name }),
+            el('span', { class: 'len', text: seconds[i] !== undefined ? duration(seconds[i]) : '' }),
+            button));
+        }
+        put(chapters, ...rows);
+      } catch (error) {
+        put(chapters, el('li', {}, el('span', { class: 'name', text: error.message })));
+      }
+    };
+    return el('div', { class: 'source' },
+      el('button', { class: 'source-head', onclick: toggle },
+        stage({ kind: source.kind, image: source.image, emoji: source.emoji, color: source.color }),
+        el('div', { class: 'info' }, el('b', { text: source.title, title: source.title }),
+          el('span', { text: `${source.chapters} ${source.chapters === 1 ? 'chapter' : 'chapters'} · ${source.where}` })),
+        chev),
+      chapters);
+  }));
+}
+
 function openMake({ target, toMac, files } = {}) {
   const current = card();
   const make = {
     step: target ? 2 : 1,
     target: target ? { type: 'tag', uid: target.uid, existing: target } : toMac || !current ? { type: 'mac' } : { type: 'none' },
     tracks: [],
-    look: { title: target && target.kind === 'custom' ? target.title : '', emoji: target?.emoji || emojis[Math.floor(Math.random() * 12)], color: target?.color || palette[Math.floor(Math.random() * palette.length)] },
+    look: { title: target && target.kind === 'custom' ? target.title : '', emoji: target?.emoji || emojis[Math.floor(Math.random() * 15)], color: target?.color || palette[Math.floor(Math.random() * palette.length)], usePhoto: false, photoRef: null, previewUrl: null },
     keepAudioId: true,
     quality: state.settings?.bitRate || 96,
     job: null,
@@ -974,7 +1131,8 @@ function openMake({ target, toMac, files } = {}) {
       el('div', { class: 'button-row' },
         el('button', { class: 'btn btn-primary', onclick: pickFiles }, icon('file'), 'Choose files'),
         el('button', { class: 'btn btn-soft', onclick: pickFolder }, icon('folder'), 'Choose a folder'),
-        navigator.mediaDevices?.getUserMedia ? el('button', { class: 'btn btn-soft', onclick: () => openRecorder(file => uploadFiles([file])) }, icon('mic'), 'Record my voice') : null),
+        navigator.mediaDevices?.getUserMedia ? el('button', { class: 'btn btn-soft', onclick: () => openRecorder(file => uploadFiles([file])) }, icon('mic'), 'Record my voice') : null,
+        el('button', { class: 'btn btn-soft', onclick: () => openChapterPicker(addStaged) }, icon('shelf'), 'Add from a tonie')),
       fileInput, folderInput);
     /* the drop itself is handled for the whole window, see the end of this file */
     zone.addEventListener('dragover', event => { if ([...event.dataTransfer.types].includes('Files')) zone.classList.add('over'); });
@@ -994,7 +1152,8 @@ function openMake({ target, toMac, files } = {}) {
     const titleInput = el('input', { class: 'input big', value: make.look.title, placeholder: `${childName()}'s bedtime stories`, maxlength: 60, autofocus: true });
     const preview = el('div', { class: 'preview-card' });
     const drawPreview = () => put(preview, tonieCard({
-      kind: 'custom', title: make.look.title || titleInput.placeholder, emoji: make.look.emoji, color: make.look.color,
+      kind: 'custom', title: make.look.title || titleInput.placeholder,
+      emoji: make.look.usePhoto ? null : make.look.emoji, image: make.look.usePhoto ? make.look.previewUrl : null, color: make.look.color,
       chapters: make.tracks.length, seconds: totalSeconds()
     }));
     titleInput.addEventListener('input', () => { make.look.title = titleInput.value; drawPreview(); });
@@ -1048,8 +1207,9 @@ function openMake({ target, toMac, files } = {}) {
     try {
       make.job = await post('/make', {
         title,
-        emoji: make.look.emoji,
+        emoji: make.look.usePhoto ? null : make.look.emoji,
         color: make.look.color,
+        picture: make.look.usePhoto ? make.look.photoRef : null,
         cardId: make.target.type === 'mac' ? null : card()?.id,
         uid: make.target.uid,
         keepAudioId: make.keepAudioId,

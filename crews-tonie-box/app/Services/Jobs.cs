@@ -124,7 +124,96 @@ public class Staging
         return Add(file);
     }
 
+    /* a chapter pulled out of an existing tonie, ready to go into a new one */
+    public StagedFile AddOgg(byte[] ogg, string title, string name, double seconds)
+    {
+        string dir = System.IO.Path.Combine(paths.Temp, "imported", Guid.NewGuid().ToString("N")[..12]);
+        Directory.CreateDirectory(dir);
+        string safe = string.Concat((name ?? "chapter").Split(System.IO.Path.GetInvalidFileNameChars())).Trim();
+        string file = System.IO.Path.Combine(dir, (safe.Length > 0 ? safe : "chapter") + ".ogg");
+        File.WriteAllBytes(file, ogg);
+        var staged = Add(file);
+        if (!string.IsNullOrWhiteSpace(title))
+        {
+            staged.Title = title.Trim();
+        }
+        if (seconds > 0)
+        {
+            staged.Seconds = seconds;
+        }
+        return staged;
+    }
+
     public StagedFile Get(string id) => id != null && files.TryGetValue(id, out var file) ? file : null;
+}
+
+/* photos the user picks for their own tonies: uploaded to a temp spot, then kept by content hash when a tonie is made */
+public class Covers
+{
+    private static readonly string[] Kinds = { ".png", ".jpg", ".jpeg", ".gif", ".webp" };
+    private readonly AppPaths paths;
+    private readonly ConcurrentDictionary<string, (string Path, string Ext)> pending = new();
+
+    public Covers(AppPaths paths)
+    {
+        this.paths = paths;
+    }
+
+    public static bool IsImage(string name) => Kinds.Contains(System.IO.Path.GetExtension(name ?? "").ToLowerInvariant());
+
+    public async Task<object> UploadAsync(string name, Stream body, CancellationToken cancel)
+    {
+        string ext = System.IO.Path.GetExtension(name ?? "").ToLowerInvariant();
+        if (!Kinds.Contains(ext))
+        {
+            throw new InvalidOperationException("Please choose a picture: PNG, JPEG, GIF or WebP.");
+        }
+        string dir = System.IO.Path.Combine(paths.Temp, "covers");
+        Directory.CreateDirectory(dir);
+        string id = Guid.NewGuid().ToString("N")[..12];
+        string file = System.IO.Path.Combine(dir, id + ext);
+        await using (var output = File.Create(file))
+        {
+            await body.CopyToAsync(output, cancel);
+        }
+        if (new FileInfo(file).Length > 8 << 20)
+        {
+            File.Delete(file);
+            throw new InvalidOperationException("That picture is very large. Please pick one under 8 MB.");
+        }
+        pending[id] = (file, ext);
+        return new { id };
+    }
+
+    /* moves a just-uploaded picture to its lasting home, named by the tonie's hash; returns the file name */
+    public string Keep(string pictureId, string hash)
+    {
+        if (string.IsNullOrEmpty(pictureId) || hash == null || !pending.TryGetValue(pictureId, out var upload))
+        {
+            return null;
+        }
+        Clear(hash);
+        string name = hash.ToUpperInvariant() + upload.Ext;
+        File.Copy(upload.Path, System.IO.Path.Combine(paths.Covers, name), true);
+        return name;
+    }
+
+    public string Find(string hash) =>
+        hash == null ? null : Directory.EnumerateFiles(paths.Covers, hash.ToUpperInvariant() + ".*").FirstOrDefault();
+
+    public void Clear(string hash)
+    {
+        foreach (string file in Directory.EnumerateFiles(paths.Covers, hash.ToUpperInvariant() + ".*"))
+        {
+            try
+            {
+                File.Delete(file);
+            }
+            catch (Exception)
+            {
+            }
+        }
+    }
 }
 
 /* tonie files kept on the Mac: backups and tonies saved for later, each with a .json next to it */
@@ -229,6 +318,8 @@ public class MakeRequest
     public string Title { get; set; }
     public string Emoji { get; set; }
     public string Color { get; set; }
+    /* an uploaded photo's id, or null for an emoji */
+    public string Picture { get; set; }
     public List<MakeTrack> Tracks { get; set; } = new();
     /* where it goes: a tag on a card, or the shelf on the Mac */
     public string CardId { get; set; }
@@ -252,15 +343,17 @@ public class Workshop
     private readonly Library library;
     private readonly Staging staging;
     private readonly Shelf shelf;
+    private readonly Covers covers;
     private readonly JsonStore<Settings> settings;
 
-    public Workshop(AppPaths paths, Cards cards, Library library, Staging staging, Shelf shelf, JsonStore<Settings> settings)
+    public Workshop(AppPaths paths, Cards cards, Library library, Staging staging, Shelf shelf, Covers covers, JsonStore<Settings> settings)
     {
         this.paths = paths;
         this.cards = cards;
         this.library = library;
         this.staging = staging;
         this.shelf = shelf;
+        this.covers = covers;
         this.settings = settings;
     }
 
@@ -347,7 +440,8 @@ public class Workshop
         var audio = await Task.Run(() => new TonieAudio(tracks.Select(t => t.File.Path).ToArray(), audioId, bitRate * 1000, vbr, null, progress), job.Cancel.Token);
         string hash = Convert.ToHexString(audio.Header.Hash);
 
-        library.Remember(hash, new CustomTonie { Title = title, Emoji = request.Emoji, Color = request.Color, Chapters = titles.ToList(), Uid = uid });
+        string picture = covers.Keep(request.Picture, hash);
+        library.Remember(hash, new CustomTonie { Title = title, Emoji = request.Emoji, Color = request.Color, Picture = picture, Chapters = titles.ToList(), Uid = uid });
 
         if (card == null)
         {
@@ -355,7 +449,7 @@ public class Workshop
             job.Step = "Saving it on your Mac";
             string temp = Path.Combine(paths.Temp, hash + ".taf");
             await File.WriteAllBytesAsync(temp, audio.FileContent);
-            var saved = shelf.Add(temp, new TonieItem { Title = title, Hash = hash, AudioId = audio.Header.AudioId, Kind = "custom", Seconds = audio.GetStream().TotalSamples / 48000.0, Chapters = titles.Length, Emoji = request.Emoji, Color = request.Color }, "made");
+            var saved = shelf.Add(temp, new TonieItem { Title = title, Hash = hash, AudioId = audio.Header.AudioId, Kind = "custom", Seconds = audio.GetStream().TotalSamples / 48000.0, Chapters = titles.Length, Emoji = picture != null ? null : request.Emoji, Color = request.Color, Image = picture != null ? "/api/cover/" + hash : null }, "made");
             File.Delete(temp);
             return new { shelf = saved.Id, hash, title };
         }

@@ -50,6 +50,37 @@ function toneWav(file, seconds, freq) {
   return file;
 }
 
+/* a tiny PNG, so the test needs no image tools */
+function makePng(file) {
+  const zlib = require('zlib');
+  const crc = buf => {
+    let c = ~0;
+    for (const b of buf) {
+      c ^= b;
+      for (let i = 0; i < 8; i++) c = (c >>> 1) ^ (0xEDB88320 & -(c & 1));
+    }
+    const out = Buffer.alloc(4);
+    out.writeUInt32BE((~c) >>> 0, 0);
+    return out;
+  };
+  const chunk = (tag, data) => {
+    const body = Buffer.concat([Buffer.from(tag), data]);
+    const len = Buffer.alloc(4);
+    len.writeUInt32BE(data.length, 0);
+    return Buffer.concat([len, body, crc(body)]);
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(16, 0);
+  ihdr.writeUInt32BE(16, 4);
+  ihdr[8] = 8;
+  ihdr[9] = 2;
+  const raw = Buffer.concat(Array.from({ length: 16 }, () => Buffer.concat([Buffer.from([0]), Buffer.alloc(48, 0xcc)])));
+  const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
+  fs.writeFileSync(file, png);
+  return file;
+}
+
 function startApp(work) {
   const sd = path.join(work, 'sd');
   fs.mkdirSync(sd);
@@ -135,10 +166,26 @@ function startApp(work) {
     await page.waitForFunction(() => document.querySelectorAll('.track').length === 2 && !document.querySelector('.track.uploading'), null, { timeout: 30000 });
     const tracks = await page.locator('.track input').evaluateAll(inputs => inputs.map(input => input.value));
     check(tracks.join('|') === 'Hello|Good night', `sounds added in order with clean names (${tracks.join(', ')})`);
+    // pull a chapter out of a tonie already on the card, into this playlist
+    await page.locator('.btn', { hasText: 'Add from a tonie' }).click();
+    await page.waitForSelector('.source-list .source');
+    await shot('make-add-from-tonie');
+    await page.locator('.source .source-head').first().click();
+    await page.waitForSelector('.source .chapters li .btn');
+    await page.locator('.source .chapters li .btn', { hasText: /^Add$/ }).first().click();
+    await page.waitForTimeout(600);
+    await page.locator('.dialog .btn-primary', { hasText: 'Done' }).click();
+    await page.waitForFunction(() => document.querySelectorAll('.track').length === 3 && !document.querySelector('.track.uploading'), null, { timeout: 20000 });
+    check(await page.locator('.track').count() === 3, 'a chapter from another tonie joins the playlist');
     await shot('make-sounds');
     await page.click('.dialog-foot .btn-primary');
     await page.fill('.input.big', 'Test bedtime');
     await page.locator('.emoji-grid button').nth(3).click();
+    // and a photo of your own
+    makePng(path.join(work, 'cover.png'));
+    await page.setInputFiles('.photo-row input[type=file]', path.join(work, 'cover.png'));
+    await page.waitForSelector('.photo-thumb.on', { timeout: 10000 });
+    check(await page.locator('.preview-card .stage img').count() === 1, 'your own photo shows in the preview');
     await shot('make-name');
     await page.click('.dialog-foot .btn-magic');
     const done = await page.waitForSelector('.done-art', { timeout: 60000 }).then(() => true, () => false);

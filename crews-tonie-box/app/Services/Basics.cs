@@ -61,6 +61,8 @@ public class AppPaths
     public string Exports { get; }
     public string Cache { get; }
     public string Temp { get; }
+    /* photos the user picked for their own tonies */
+    public string Covers { get; }
 
     public AppPaths(string dataDir = null)
     {
@@ -71,8 +73,9 @@ public class AppPaths
         Backups = Path.Combine(Data, "Backups");
         Exports = dataDir != null ? Path.Combine(Data, "Exports") : Path.Combine(home, "Music", AppInfo.Name);
         Cache = Path.Combine(Data, "Cache");
+        Covers = Path.Combine(Data, "Covers");
         Temp = Path.Combine(Path.GetTempPath(), "crews-tonie-box-" + Environment.ProcessId);
-        foreach (string dir in new[] { Data, Backups, Cache, Temp })
+        foreach (string dir in new[] { Data, Backups, Cache, Covers, Temp })
         {
             Directory.CreateDirectory(dir);
         }

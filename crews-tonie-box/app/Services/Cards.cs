@@ -346,6 +346,13 @@ public partial class Cards
             item.Emoji = custom?.Emoji;
         }
 
+        /* a photo the user picked wins over the emoji and the shop picture */
+        if (custom?.Picture != null && item.Hash != null)
+        {
+            item.Image = "/api/cover/" + item.Hash;
+            item.Emoji = null;
+        }
+
         if (item.ChapterTitles.Count != item.Chapters)
         {
             /* chapter names only help when they match the file */

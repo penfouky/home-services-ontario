@@ -96,6 +96,16 @@ def tone_file(path, seconds, freq):
     return path
 
 
+def tiny_png():
+    import struct
+    import zlib
+    def chunk(tag, data):
+        return struct.pack('>I', len(data)) + tag + data + struct.pack('>I', zlib.crc32(tag + data))
+    raw = b''.join(b'\0' + b'\xff\x6f\xae' * 16 for _ in range(16))
+    return (b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', 16, 16, 8, 2, 0, 0, 0))
+            + chunk(b'IDAT', zlib.compress(raw)) + chunk(b'IEND', b''))
+
+
 def main(exe, teddy, tonies_json=None):
     work = tempfile.mkdtemp()
     sd, data = os.path.join(work, 'sd'), os.path.join(work, 'data')
@@ -242,6 +252,37 @@ def run(app, sd, data, work, tags, info):
     uid = app.get('/api/uid/e0:04:03:50:1e:e9:18:f2')
     check(uid['valid'] and uid['uid'] == 'E00403501EE918F2' and uid['tonieLike'] and uid['folder'] == 'F218E91E' and uid['file'] == '500304E0', 'tag id check')
     check(not app.get('/api/uid/1234')['valid'], 'short tag ids are refused')
+
+    print('== A custom playlist from chapters of other tonies')
+    status, staged1 = app.request('POST', f'/api/cards/{card}/tonies/{custom}/chapters/0/stage')
+    check(status == 200 and staged1.get('id') and staged1.get('seconds', 0) > 0, f'staged a chapter from an existing tonie ({staged1.get("title")})')
+    status, _ = app.request('POST', f'/api/cards/{card}/tonies/{custom}/chapters/9/stage')
+    check(status == 404, 'a chapter that is not there cannot be staged')
+    sources = [staged1['id']]
+    if 'official' in tags:
+        _, off = app.request('POST', f'/api/cards/{card}/tonies/{tags["official"]}/chapters/0/stage')
+        sources.append(off['id'])
+    job = app.job(app.post('/api/make', {'title': 'Mixed playlist', 'cardId': None, 'tracks': [{'id': i} for i in sources]}))
+    mix = app.get(f"/api/shelf/{job['result']['shelf']}") if job['state'] == 'done' else {}
+    check(job['state'] == 'done' and len(mix.get('chapterSeconds', [])) == len(sources),
+          f'made a new tonie mixing {len(sources)} chapters pulled from other tonies')
+
+    print('== A photo on a tonie')
+    png = tiny_png()
+    status, up = app.request('PUT', '/api/covers/upload?name=me.png', png)
+    check(status == 200 and up.get('id'), 'uploaded a photo')
+    status, _ = app.request('PUT', '/api/covers/upload?name=me.txt', png)
+    check(status == 400, 'a file that is not a picture is refused')
+    _, chap = app.request('POST', f'/api/cards/{card}/tonies/{custom}/chapters/0/stage')
+    job = app.job(app.post('/api/make', {'title': 'With a photo', 'cardId': None, 'picture': up['id'], 'tracks': [{'id': chap['id']}]}))
+    made_hash = job['result']['hash'] if job['state'] == 'done' else ''
+    response, image = app.request('GET', f'/api/cover/{made_hash}', raw=True)
+    check(job['state'] == 'done' and response.status == 200 and image[:8] == b'\x89PNG\r\n\x1a\n', 'the photo is kept and served for the tonie')
+    _, up2 = app.request('PUT', '/api/covers/upload?name=x.png', png)
+    after = app.post(f'/api/cards/{card}/tonies/{other_uid}/rename', {'title': 'Blue hat', 'picture': up2['id']})
+    check((after.get('image') or '').startswith('/api/cover/') and not after.get('emoji'), 'a photo can be added to a tonie by renaming it')
+    back = app.post(f'/api/cards/{card}/tonies/{other_uid}/rename', {'title': 'Blue hat', 'emoji': '🦄', 'picture': ''})
+    check(not back.get('image') and back.get('emoji') == '🦄', 'choosing an emoji again clears the photo')
 
     print('== Stopping a tonie while it is made')
     long_file = tone_file(os.path.join(work, 'long.wav'), 120, 440)

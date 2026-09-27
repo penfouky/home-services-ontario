@@ -9,9 +9,9 @@ namespace CrewsTonieBox;
 public static class Api
 {
     public record Context(AppPaths Paths, JsonStore<Settings> Settings, TonieDb Db, Library Library, Cards Cards, Staging Staging,
-        Shelf Shelf, Jobs Jobs, Workshop Workshop, Previews Previews, WindowBridge Bridge, CancellationTokenSource Quit);
+        Shelf Shelf, Covers Covers, Jobs Jobs, Workshop Workshop, Previews Previews, WindowBridge Bridge, CancellationTokenSource Quit);
 
-    public record RenameBody(string Title, string Emoji, string Color);
+    public record RenameBody(string Title, string Emoji, string Color, string Picture);
     public record NameBody(string Name);
     public record FormatBody(string Format);
     public record TargetBody(string CardId, string Uid);
@@ -104,8 +104,35 @@ public static class Api
             {
                 return NoTonie();
             }
-            c.Library.Rename(item.Hash, body.Title?.Trim(), body.Emoji, body.Color);
+            bool changePicture;
+            string cover = null;
+            if (body.Picture is null or "keep")
+            {
+                changePicture = false;
+            }
+            else if (body.Picture.Length == 0)
+            {
+                changePicture = true;
+                c.Covers.Clear(item.Hash);
+            }
+            else
+            {
+                cover = c.Covers.Keep(body.Picture, item.Hash);
+                changePicture = cover != null;
+            }
+            c.Library.Rename(item.Hash, body.Title?.Trim(), body.Emoji, body.Color, cover, changePicture);
             return Results.Ok(Find(c, id, uid));
+        });
+
+        /* a chapter of an existing tonie, staged as a source for a new one */
+        api.MapPost("/cards/{id}/tonies/{uid}/chapters/{n:int}/stage", async (string id, string uid, int n) =>
+        {
+            if (Find(c, id, uid) is not { } item)
+            {
+                return NoTonie();
+            }
+            var staged = await Task.Run(() => StageChapter(c, item.Path, n, item.Title, ChapterName(item.ChapterTitles, n)));
+            return staged != null ? Results.Ok(staged) : NoTonie();
         });
 
         api.MapPost("/cards/{id}/tags/{uid}/name", (string id, string uid, NameBody body) =>
@@ -203,6 +230,17 @@ public static class Api
         api.MapGet("/shelf/{sid}/chapters/{n:int}.ogg", (string sid, int n) =>
             c.Shelf.Get(sid) is { } item ? c.Previews.Ogg(item.File, n, item.Title) : NoTonie());
 
+        api.MapPost("/shelf/{sid}/chapters/{n:int}/stage", async (string sid, int n) =>
+        {
+            if (c.Shelf.Get(sid) is not { } item)
+            {
+                return NoTonie();
+            }
+            var chapters = c.Library.Find(item.Hash)?.Chapters;
+            var staged = await Task.Run(() => StageChapter(c, item.File, n, item.Title, ChapterName(chapters, n)));
+            return staged != null ? Results.Ok(staged) : NoTonie();
+        });
+
         api.MapPost("/shelf/{sid}/put", (string sid, TargetBody body) =>
             c.Shelf.Get(sid) is { } item ? Results.Ok(c.Jobs.Start("put", "Putting " + item.Title + " on a tonie", job => c.Workshop.PutOnTagAsync(job, item, body.CardId, body.Uid))) : NoTonie());
 
@@ -271,6 +309,31 @@ public static class Api
                 type = "application/octet-stream";
             }
             return Results.File(file.Path, type, enableRangeProcessing: true);
+        });
+
+        /* ---- pictures for your own tonies ---- */
+
+        api.MapPut("/covers/upload", async (HttpRequest request, string name) =>
+        {
+            try
+            {
+                return Results.Ok(await c.Covers.UploadAsync(name, request.Body, request.HttpContext.RequestAborted));
+            }
+            catch (InvalidOperationException e)
+            {
+                return Results.BadRequest(new { error = e.Message });
+            }
+        });
+
+        api.MapGet("/cover/{hash}", (string hash) =>
+        {
+            string file = c.Covers.Find(hash);
+            if (file == null)
+            {
+                return Results.NotFound();
+            }
+            ContentTypes.TryGetContentType(file, out string type);
+            return Results.File(file, type ?? "image/png");
         });
 
         /* ---- making tonies ---- */
@@ -352,6 +415,21 @@ public static class Api
             return Results.Ok();
         });
     }
+
+    /* pulls one chapter out of a tonie file and stages it as a source for a new tonie */
+    private static StagedFile StageChapter(Context c, string tonieFile, int n, string tonieTitle, string chapterName)
+    {
+        var stream = c.Previews.Stream(tonieFile);
+        if (n < 0 || n >= stream.Chapters.Count)
+        {
+            return null;
+        }
+        byte[] ogg = stream.ExtractOgg(n, new[] { "TITLE=" + chapterName });
+        return c.Staging.AddOgg(ogg, chapterName, $"{tonieTitle} – {chapterName}", stream.Chapters[n].Seconds);
+    }
+
+    private static string ChapterName(List<string> titles, int n) =>
+        titles != null && n >= 0 && n < titles.Count && !string.IsNullOrWhiteSpace(titles[n]) ? titles[n] : "Chapter " + (n + 1);
 
     private static TonieItem Find(Context c, string cardId, string uid)
     {
