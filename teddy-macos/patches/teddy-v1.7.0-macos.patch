@@ -1,0 +1,393 @@
+diff --git a/Teddy/Program.cs b/Teddy/Program.cs
+index 8b54bd6..da8e6bd 100644
+--- a/Teddy/Program.cs
++++ b/Teddy/Program.cs
+@@ -36,6 +36,7 @@ using System.Collections.Generic;
+ using System.IO;
+ using System.Linq;
+ using System.Net;
++using System.Runtime.InteropServices;
+ using System.Security.Cryptography;
+ using System.Text;
+ using System.Text.RegularExpressions;
+@@ -47,6 +48,9 @@ namespace Teddy
+     {
+         public static int Verbosity = 0;
+ 
++        /* name shown in the help, the macOS/Linux build is called "teddy" */
++        private static readonly string ExeName = RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "Teddy.exe" : "teddy";
++
+         private static TonieTools.TonieData[] TonieInfos = new TonieTools.TonieData[0];
+ 
+ 
+@@ -199,9 +203,9 @@ namespace Teddy
+             }
+             catch (OptionException e)
+             {
+-                Console.Write("Teddy.exe: ");
++                Console.Write(ExeName + ": ");
+                 Console.WriteLine(e.Message);
+-                Console.WriteLine("Try `Teddy.exe --help' for more information.");
++                Console.WriteLine("Try `" + ExeName + " --help' for more information.");
+                 return;
+             }
+ 
+@@ -749,6 +753,30 @@ distributed under the License is distributed on an 'AS IS' BASIS,
+ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ See the License for the specific language governing permissions and
+ limitations under the License.
++");
++            Console.WriteLine();
++            Console.WriteLine();
++            Console.WriteLine("Contains MIT license for 'NLayer' (https://github.com/naudio/NLayer) ");
++            Console.WriteLine(@"
++   Copyright (c) 2018 Mark Heath, Andrew Ward & Contributors
++
++   Permission is hereby granted, free of charge, to any person obtaining a copy
++   of this software and associated documentation files (the 'Software'), to deal
++   in the Software without restriction, including without limitation the rights
++   to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
++   copies of the Software, and to permit persons to whom the Software is
++   furnished to do so, subject to the following conditions:
++
++   The above copyright notice and this permission notice shall be included in all
++   copies or substantial portions of the Software.
++
++   THE SOFTWARE IS PROVIDED 'AS IS', WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++   AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
++   SOFTWARE.
+ ");
+             Console.WriteLine();
+             Console.WriteLine();
+@@ -809,6 +837,12 @@ limitations under the License.
+         {
+             foreach (var file in new DirectoryInfo(v).GetFiles())
+             {
++                /* skip the "._" AppleDouble files macOS leaves on FAT/exFAT drives */
++                if (file.Name.StartsWith("._"))
++                {
++                    continue;
++                }
++
+                 /* search for original tonie files or those we renamed */
+                 if (file.Name.EndsWith("0304E0") || Regex.Matches(file.Name, @"[A-Za-z0-9-]+ - [A-F0-9]+ - .*").Count == 1)
+                 {
+@@ -832,10 +866,10 @@ limitations under the License.
+             Console.WriteLine("                         (build " + GetVersion() + ")");
+             Console.WriteLine("");
+             Console.WriteLine("Start with:");
+-            Console.WriteLine("  Teddy.exe -m decode [options] <toniefile>          - Dump tonie file content");
+-            Console.WriteLine("  Teddy.exe -m info [options] <toniefile>            - Show header details");
+-            Console.WriteLine("  Teddy.exe -m encode [options] <folder>             - Create a tonie file from all MP3 in this folder");
+-            Console.WriteLine("  Teddy.exe -m encode [options] <file1> <file2> ...  - Create a tonie file from specified MP3 files");
++            Console.WriteLine("  " + ExeName + " -m decode [options] <toniefile>          - Dump tonie file content");
++            Console.WriteLine("  " + ExeName + " -m info [options] <toniefile>            - Show header details");
++            Console.WriteLine("  " + ExeName + " -m encode [options] <folder>             - Create a tonie file from all MP3 in this folder");
++            Console.WriteLine("  " + ExeName + " -m encode [options] <file1> <file2> ...  - Create a tonie file from specified MP3 files");
+             Console.WriteLine("");
+             Console.WriteLine("Options:");
+             p.WriteOptionDescriptions(Console.Out);
+diff --git a/Teddy/Teddy.csproj b/Teddy/Teddy.csproj
+index 9c9059d..110307a 100644
+--- a/Teddy/Teddy.csproj
++++ b/Teddy/Teddy.csproj
+@@ -1,11 +1,17 @@
+ ﻿<Project Sdk="Microsoft.NET.Sdk">
+   <PropertyGroup>
+-    <TargetFramework>net48</TargetFramework>
++    <TargetFrameworks>net48;net10.0</TargetFrameworks>
+     <OutputType>Exe</OutputType>
+     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
++  </PropertyGroup>
++  <PropertyGroup Condition="'$(TargetFramework)' == 'net48'">
+     <UseWindowsForms>true</UseWindowsForms>
+     <ImportWindowsDesktopTargets>true</ImportWindowsDesktopTargets>
+   </PropertyGroup>
++  <!-- cross-platform build, e.g. for macOS: dotnet publish -f net10.0 -r osx-arm64 -->
++  <PropertyGroup Condition="'$(TargetFramework)' == 'net10.0'">
++    <AssemblyName>teddy</AssemblyName>
++  </PropertyGroup>
+   <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Debug|x64'">
+     <OutputPath>bin\x64\Debug\</OutputPath>
+     <CodeAnalysisRuleSet>MinimumRecommendedRules.ruleset</CodeAnalysisRuleSet>
+diff --git a/TonieAudio/SpeexResamplingWaveProvider.cs b/TonieAudio/SpeexResamplingWaveProvider.cs
+new file mode 100644
+index 0000000..b5b9789
+--- /dev/null
++++ b/TonieAudio/SpeexResamplingWaveProvider.cs
+@@ -0,0 +1,106 @@
++﻿using Concentus.Common;
++using NAudio.Wave;
++using System;
++
++namespace TonieFile
++{
++    /* converts the sample rate of 16 bit PCM audio using the Speex resampler from Concentus.
++       managed replacement for MediaFoundationResampler, which only exists on Windows. */
++    public class SpeexResamplingWaveProvider : IWaveProvider
++    {
++        private readonly IWaveProvider Source;
++        private readonly SpeexResampler Resampler;
++        private readonly int Channels;
++        private readonly byte[] SourceBuffer;
++        private readonly short[] InSamples;
++        private short[] OutSamples = new short[0];
++        private int InFrames = 0;
++        private int InPos = 0;
++        private int FlushFrames;
++        private bool SourceDone = false;
++
++        public WaveFormat WaveFormat { get; }
++
++        public SpeexResamplingWaveProvider(IWaveProvider source, int sampleRate, int quality)
++        {
++            if (source.WaveFormat.Encoding != WaveFormatEncoding.Pcm || source.WaveFormat.BitsPerSample != 16)
++            {
++                throw new ArgumentException("Resampler needs 16 bit PCM input");
++            }
++
++            Source = source;
++            Channels = source.WaveFormat.Channels;
++            WaveFormat = new WaveFormat(sampleRate, 16, Channels);
++            SourceBuffer = new byte[4096 * 2 * Channels];
++            InSamples = new short[4096 * Channels];
++
++            Resampler = SpeexResampler.Create(Channels, source.WaveFormat.SampleRate, sampleRate, quality);
++            /* skip the filter delay at the start and feed the same amount of silence at the end, so the output has the same length */
++            Resampler.SkipZeroes();
++            FlushFrames = Resampler.InputLatency;
++        }
++
++        public int Read(byte[] buffer, int offset, int count)
++        {
++            int outFrames = count / (2 * Channels);
++            int doneFrames = 0;
++
++            if (OutSamples.Length < outFrames * Channels)
++            {
++                OutSamples = new short[outFrames * Channels];
++            }
++
++            while (doneFrames < outFrames)
++            {
++                if (InPos >= InFrames && !Refill())
++                {
++                    break;
++                }
++
++                int inLen = InFrames - InPos;
++                int outLen = outFrames - doneFrames;
++                Resampler.ProcessInterleaved(InSamples, InPos * Channels, ref inLen, OutSamples, doneFrames * Channels, ref outLen);
++
++                if (inLen == 0 && outLen == 0)
++                {
++                    throw new InvalidOperationException("Resampler made no progress");
++                }
++                InPos += inLen;
++                doneFrames += outLen;
++            }
++
++            int bytes = doneFrames * Channels * 2;
++            Buffer.BlockCopy(OutSamples, 0, buffer, offset, bytes);
++
++            return bytes;
++        }
++
++        private bool Refill()
++        {
++            InPos = 0;
++            InFrames = 0;
++
++            if (!SourceDone)
++            {
++                InFrames = Source.Read(SourceBuffer, 0, SourceBuffer.Length) / (2 * Channels);
++
++                if (InFrames > 0)
++                {
++                    Buffer.BlockCopy(SourceBuffer, 0, InSamples, 0, InFrames * Channels * 2);
++                    return true;
++                }
++                SourceDone = true;
++            }
++
++            if (FlushFrames > 0)
++            {
++                InFrames = Math.Min(FlushFrames, InSamples.Length / Channels);
++                Array.Clear(InSamples, 0, InFrames * Channels);
++                FlushFrames -= InFrames;
++                return true;
++            }
++
++            return false;
++        }
++    }
++}
+diff --git a/TonieAudio/TonieAudio.cs b/TonieAudio/TonieAudio.cs
+index bc876c1..da478f5 100644
+--- a/TonieAudio/TonieAudio.cs
++++ b/TonieAudio/TonieAudio.cs
+@@ -34,6 +34,8 @@ using Concentus.Oggfile;
+ using Concentus.Structs;
+ using Id3;
+ using NAudio.Wave;
++using NAudio.Wave.SampleProviders;
++using NLayer.NAudioSupport;
+ using System;
+ using System.Collections.Generic;
+ using System.IO;
+@@ -317,11 +319,13 @@ namespace TonieFile
+         {
+             foreach (var source in sources)
+             {
+-                string item = source.Trim('"').Trim(Path.DirectorySeparatorChar);
++                /* only trim trailing separators, a leading one is the root of an absolute path on macOS/Linux */
++                string item = source.Trim('"').TrimEnd(Path.DirectorySeparatorChar);
+ 
+                 if (Directory.Exists(item))
+                 {
+-                    var filesInDir = Directory.GetFiles(item, "*.mp3").Concat(Directory.GetFiles(item, "*.ogg")).OrderBy(n => n).ToArray();
++                    /* skip the "._name.mp3" AppleDouble files macOS leaves on FAT/exFAT drives */
++                    var filesInDir = Directory.GetFiles(item, "*.mp3").Concat(Directory.GetFiles(item, "*.ogg")).Where(n => !Path.GetFileName(n).StartsWith("._")).OrderBy(n => n).ToArray();
+                     string[] sourceFiles = filesInDir;
+                     bool failed = false;
+ 
+@@ -501,8 +505,8 @@ namespace TonieFile
+ 
+                             try
+                             {
+-                                var prefixStream = new Mp3FileReader(prefixFile);
+-                                var prefixResampled = new MediaFoundationResampler(prefixStream, outFormat);
++                                var prefixStream = OpenMp3(prefixFile);
++                                var prefixResampled = ConvertFormat(prefixStream, outFormat);
+ 
+                                 while (true)
+                                 {
+@@ -540,11 +544,12 @@ namespace TonieFile
+                         switch (type)
+                         {
+                             case "mp3":
+-                                stream = new Mp3FileReader(sourceFile);
++                                stream = OpenMp3(sourceFile);
+                                 break;
+ 
+                             case "ogg":
+-                                stream = new OpusWaveStream(File.Open(sourceFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite), bitRate, channels);
++                                /* the opus decoder needs the sampling rate here, not the bitrate */
++                                stream = new OpusWaveStream(File.Open(sourceFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite), samplingRate, channels);
+                                 break;
+                         }
+ 
+@@ -554,7 +559,7 @@ namespace TonieFile
+                             continue;
+                         }
+ 
+-                        var streamResampled = new MediaFoundationResampler(stream, outFormat);
++                        var streamResampled = ConvertFormat(stream, outFormat);
+ 
+                         while (true)
+                         {
+@@ -654,6 +659,81 @@ namespace TonieFile
+             return samples;
+         }
+ 
++        /* the ACM MP3 codec and MediaFoundationResampler only exist on Windows, use managed code elsewhere */
++        private static bool UseWindowsCodecs => RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
++
++        /* Speex quality 5: 80 taps, ~100 dB stopband, passband up to 20 kHz for 44.1 kHz sources */
++        private const int ResamplerQuality = 5;
++
++        private static WaveStream OpenMp3(string fileName)
++        {
++            if (UseWindowsCodecs)
++            {
++                /* same as NAudio's Mp3FileReader */
++                return new Mp3FileReaderBase(fileName, format => new AcmMp3FrameDecompressor(format));
++            }
++            return new Mp3FileReaderBase(fileName, format => new Mp3FrameDecompressor(format));
++        }
++
++        /* returns the stream's audio as 16 bit PCM in the given sampling rate and channel count */
++        private static IWaveProvider ConvertFormat(WaveStream stream, WaveFormat outFormat)
++        {
++            if (UseWindowsCodecs)
++            {
++                return new MediaFoundationResampler(stream, outFormat);
++            }
++
++            ISampleProvider samples = stream.ToSampleProvider();
++
++            if (samples.WaveFormat.Channels == 1 && outFormat.Channels == 2)
++            {
++                samples = new MonoToStereoSampleProvider(samples);
++            }
++            else if (samples.WaveFormat.Channels != outFormat.Channels)
++            {
++                throw new InvalidDataException("Unsupported number of channels: " + samples.WaveFormat.Channels);
++            }
++
++            IWaveProvider pcm = new SampleToWaveProvider16(samples);
++
++            if (pcm.WaveFormat.SampleRate != outFormat.SampleRate)
++            {
++                pcm = new SpeexResamplingWaveProvider(pcm, outFormat.SampleRate, ResamplerQuality);
++            }
++
++            return new FullReadWaveProvider(pcm);
++        }
++
++        /* ConvertToFloat() always converts the whole buffer, so a read must only come up short at the end of the stream */
++        private class FullReadWaveProvider : IWaveProvider
++        {
++            private readonly IWaveProvider Source;
++
++            public FullReadWaveProvider(IWaveProvider source)
++            {
++                Source = source;
++            }
++
++            public WaveFormat WaveFormat => Source.WaveFormat;
++
++            public int Read(byte[] buffer, int offset, int count)
++            {
++                int total = 0;
++
++                while (total < count)
++                {
++                    int read = Source.Read(buffer, offset + total, count - total);
++
++                    if (read <= 0)
++                    {
++                        break;
++                    }
++                    total += read;
++                }
++                return total;
++            }
++        }
++
+         private void ParseBuffer()
+         {
+             int protoBufLength = (FileContent[0] << 24) | (FileContent[1] << 16) | (FileContent[2] << 8) | FileContent[3];
+diff --git a/TonieAudio/TonieAudio.csproj b/TonieAudio/TonieAudio.csproj
+index 9fae68b..ab21b91 100644
+--- a/TonieAudio/TonieAudio.csproj
++++ b/TonieAudio/TonieAudio.csproj
+@@ -42,7 +42,12 @@
+     <PackageReference Include="Microsoft.CSharp" Version="4.7.0" />
+   </ItemGroup>
+   <ItemGroup>
+-    <PackageReference Include="NAudio" Version="2.0.1" />
++    <!-- only the NAudio parts in use, the NAudio meta package also pulls in NAudio.WinForms which breaks macOS/Linux builds -->
++    <PackageReference Include="NAudio.Core" Version="2.0.0" />
++    <PackageReference Include="NAudio.Wasapi" Version="2.0.0" />
++    <PackageReference Include="NAudio.WinMM" Version="2.0.1" />
+     <PackageReference Include="Newtonsoft.Json" Version="13.0.1" />
++    <PackageReference Include="NLayer" Version="1.16.0" />
++    <PackageReference Include="NLayer.NAudioSupport" Version="1.4.0" />
+   </ItemGroup>
+ </Project>
+\ No newline at end of file
