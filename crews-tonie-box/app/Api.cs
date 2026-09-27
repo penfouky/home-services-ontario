@@ -18,6 +18,7 @@ public static class Api
     public record PathBody(string Path);
     public record ImportBody(string Url, string Title);
     public record FormatDiskBody(string Id, string Label, string Confirm);
+    public record ChapterNamesBody(List<string> Names);
 
     private static readonly FileExtensionContentTypeProvider ContentTypes = new();
 
@@ -126,6 +127,21 @@ public static class Api
                 changePicture = cover != null;
             }
             c.Library.Rename(item.Hash, body.Title?.Trim(), body.Emoji, body.Color, cover, changePicture);
+            return Results.Ok(Find(c, id, uid));
+        });
+
+        api.MapPost("/cards/{id}/tonies/{uid}/chapters/names", (string id, string uid, ChapterNamesBody body) =>
+        {
+            if (Find(c, id, uid) is not { } item || item.Hash == null)
+            {
+                return NoTonie();
+            }
+            if (item.Kind != "custom")
+            {
+                return Results.BadRequest(new { error = "Only tonies you made here can have their chapters renamed." });
+            }
+            var names = (body.Names ?? new List<string>()).Select(n => (n ?? "").Trim()).ToList();
+            c.Library.SetChapters(item.Hash, names);
             return Results.Ok(Find(c, id, uid));
         });
 
@@ -424,6 +440,31 @@ public static class Api
             c.Jobs.Get(jid)?.Cancel.Cancel();
             return Results.Ok();
         });
+
+        /* ---- the official tonie catalog, to browse ---- */
+
+        api.MapGet("/library/search", (string q = null, string lang = null, int offset = 0, int limit = 60) =>
+        {
+            var result = c.Db.SearchCatalog(q, lang, offset, limit);
+            return Results.Ok(new
+            {
+                total = result.Total,
+                items = result.Items.Select(e => new
+                {
+                    article = e.Article,
+                    title = e.Title,
+                    series = e.Series,
+                    episode = e.Episode,
+                    language = e.Language,
+                    image = e.Image,
+                    web = e.Web,
+                    runtime = e.Runtime,
+                    tracks = e.Tracks
+                })
+            });
+        });
+
+        api.MapGet("/library/languages", () => Results.Ok(c.Db.Languages()));
 
         api.MapGet("/uid/{uid}", (string uid) =>
         {

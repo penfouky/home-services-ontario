@@ -51,6 +51,15 @@ public class Library
         }
     });
 
+    public void SetChapters(string hash, List<string> chapters) => store.Update(d =>
+    {
+        if (!d.Tonies.TryGetValue(hash.ToUpperInvariant(), out var tonie))
+        {
+            d.Tonies[hash.ToUpperInvariant()] = tonie = new CustomTonie();
+        }
+        tonie.Chapters = chapters ?? new List<string>();
+    });
+
     public string TagName(string uid) => store.Read(d => d.TagNames.TryGetValue(uid, out var name) ? name : null);
 
     public void NameTag(string uid, string name) => store.Update(d =>

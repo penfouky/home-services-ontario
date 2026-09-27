@@ -31,6 +31,7 @@ public class TonieDb
     private Dictionary<string, TonieEntry> byHash = new();
     private Dictionary<uint, List<TonieEntry>> byAudioId = new();
     private HashSet<string> images = new();
+    private List<TonieEntry> catalog = new();
 
     public int Count { get; private set; }
     public string Source { get; private set; }
@@ -101,6 +102,7 @@ public class TonieDb
         var hashes = new Dictionary<string, TonieEntry>();
         var ids = new Dictionary<uint, List<TonieEntry>>();
         var pictures = new HashSet<string>();
+        var entries = new List<TonieEntry>();
         int count = 0;
 
         using var doc = JsonDocument.Parse(json);
@@ -132,6 +134,11 @@ public class TonieDb
                 {
                     pictures.Add(entry.Image);
                 }
+                /* the browsable catalog: named items only, so "coming soon" blanks are skipped */
+                if (!string.IsNullOrWhiteSpace(entry.Series))
+                {
+                    entries.Add(entry);
+                }
                 if (!item.TryGetProperty("ids", out var idList) || idList.ValueKind != JsonValueKind.Array)
                 {
                     continue;
@@ -155,12 +162,50 @@ public class TonieDb
             }
         }
 
+        entries.Sort((a, b) =>
+        {
+            int series = string.Compare(a.Series, b.Series, StringComparison.CurrentCultureIgnoreCase);
+            return series != 0 ? series : string.Compare(a.Episode ?? "", b.Episode ?? "", StringComparison.CurrentCultureIgnoreCase);
+        });
         byHash = hashes;
         byAudioId = ids;
         images = pictures;
+        catalog = entries;
         Count = count;
         Loaded = DateTime.Now;
     }
+
+    public record CatalogResult(int Total, List<TonieEntry> Items);
+
+    /* the browsable official catalog, filtered by a search and language, paged */
+    public CatalogResult SearchCatalog(string query, string language, int offset, int limit)
+    {
+        IEnumerable<TonieEntry> found = catalog;
+        if (!string.IsNullOrWhiteSpace(language))
+        {
+            found = found.Where(e => string.Equals(e.Language, language, StringComparison.OrdinalIgnoreCase));
+        }
+        query = (query ?? "").Trim();
+        if (query.Length > 0)
+        {
+            found = found.Where(e =>
+                Has(e.Series, query) || Has(e.Episode, query) || Has(e.Article, query) ||
+                e.Tracks.Any(t => Has(t, query)));
+        }
+        var list = found.ToList();
+        return new CatalogResult(list.Count, list.Skip(Math.Max(0, offset)).Take(Math.Clamp(limit, 1, 200)).ToList());
+    }
+
+    /* languages present in the catalog, most common first, for the filter */
+    public List<object> Languages() =>
+        catalog.Where(e => !string.IsNullOrWhiteSpace(e.Language))
+            .GroupBy(e => e.Language)
+            .OrderByDescending(g => g.Count())
+            .Select(g => (object)new { language = g.Key, count = g.Count() })
+            .ToList();
+
+    private static bool Has(string haystack, string needle) =>
+        haystack != null && haystack.Contains(needle, StringComparison.OrdinalIgnoreCase);
 
     private static string Str(JsonElement element, string name) =>
         element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;

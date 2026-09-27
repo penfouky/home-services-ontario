@@ -253,6 +253,23 @@ def run(app, sd, data, work, tags, info):
     check(uid['valid'] and uid['uid'] == 'E00403501EE918F2' and uid['tonieLike'] and uid['folder'] == 'F218E91E' and uid['file'] == '500304E0', 'tag id check')
     check(not app.get('/api/uid/1234')['valid'], 'short tag ids are refused')
 
+    print('== The tonie library (catalog reference)')
+    lib = app.get('/api/library/search?q=grimm&limit=5')
+    check(lib['total'] > 0 and all('article' in i and 'tracks' in i and 'series' in i for i in lib['items']),
+          f"searching the catalog works ({lib['total']} for grimm)")
+    langs = app.get('/api/library/languages')
+    check(isinstance(langs, list) and sum(l['count'] for l in langs) > 1000, f'languages are listed with counts ({len(langs)})')
+    filtered = app.get('/api/library/search?lang=de-de&limit=3')
+    check(filtered['total'] > 100 and all((i['language'] or '').lower() == 'de-de' for i in filtered['items']), 'the language filter works')
+    check(app.get('/api/library/search?q=zzqqxx')['total'] == 0, 'a search with no matches is empty')
+
+    print('== Renaming chapters of a home-made tonie')
+    renamed = app.post(f'/api/cards/{card}/tonies/{custom}/chapters/names', {'names': ['My first chapter']})
+    check(renamed.get('chapterTitles') == ['My first chapter'], f"a custom tonie's chapters can be renamed ({renamed.get('chapterTitles')})")
+    if 'official' in tags:
+        status, _ = app.request('POST', f'/api/cards/{card}/tonies/{tags["official"]}/chapters/names', {'names': ['x']})
+        check(status == 400, 'official tonie chapters cannot be renamed')
+
     print('== A custom playlist from chapters of other tonies')
     status, staged1 = app.request('POST', f'/api/cards/{card}/tonies/{custom}/chapters/0/stage')
     check(status == 200 and staged1.get('id') and staged1.get('seconds', 0) > 0, f'staged a chapter from an existing tonie ({staged1.get("title")})')

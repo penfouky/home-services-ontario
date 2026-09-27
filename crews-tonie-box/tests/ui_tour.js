@@ -235,6 +235,20 @@ function startApp(work) {
     await page.keyboard.press('Escape');
     check((await page.locator('#title').textContent()) === "Mia's Tonie Box", 'the name shows in the title');
 
+    // the visual tonie library
+    await page.click('#library-button');
+    await page.waitForSelector('.source-list .source', { timeout: 15000 });
+    const libRows = await page.locator('.source-list .source').count();
+    check(libRows > 5, `the library shows the catalog (${libRows} rows)`);
+    await page.fill('.dialog input[type=search]', 'grimm');
+    await page.waitForTimeout(700);
+    const found = await page.locator('.source-list .source').count();
+    check(found >= 1 && found <= 60, `searching the library narrows it (${found})`);
+    await page.locator('.source .source-head').first().click();
+    check(await page.waitForSelector('.source .chapters li', { timeout: 8000 }).then(() => true, () => false), 'a catalog item shows its chapter names');
+    await shot('library');
+    await page.keyboard.press('Escape');
+
     // dropping files anywhere opens the wizard with them
     const wavBase64 = fs.readFileSync(path.join(work, '01 Hello.wav')).toString('base64');
     const transfer = await page.evaluateHandle(data => {

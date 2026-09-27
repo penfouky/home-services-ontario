@@ -1,4 +1,4 @@
-import { icons, teddy, star, sdArt } from './art.js';
+import { icons, teddy, star, sdArt, characters, character } from './art.js';
 import { confetti, sparkle, chime, pop, setSounds } from './fx.js';
 import { startRecording, maxSeconds } from './recorder.js';
 
@@ -184,7 +184,13 @@ function stage(tonie, { badge = false } = {}) {
     style: { background: `radial-gradient(circle at 50% 112%, #fff 0 30%, transparent 31%), linear-gradient(160deg, ${color}33, ${color}14 60%, #fff5fb)` }
   });
   if (badge) node.append(el('span', { class: `badge badge-${tonie.kind} stage-badge`, text: info.badge }));
-  const emojiFigure = () => el('div', { class: 'emoji-figure figure', style: { '--c': color }, text: tonie.emoji || info.emoji });
+  const emojiFigure = () => {
+    const face = tonie.emoji || info.emoji;
+    if (typeof face === 'string' && face.startsWith('art:') && characters.includes(face.slice(4))) {
+      return el('div', { class: 'art-figure figure', html: character(face.slice(4), 120) });
+    }
+    return el('div', { class: 'emoji-figure figure', style: { '--c': color }, text: face });
+  };
   if (tonie.image && !tonie.emoji) {
     /* a photo on this Mac (or a preview) is used as-is; a shop picture goes through our cache */
     const local = /^(blob:|data:|\/)/.test(tonie.image);
@@ -582,7 +588,9 @@ async function openTonie(tonie) {
         el('span', { class: 'len', text: seconds[i] !== undefined ? duration(seconds[i]) : '' }));
       list.append(row);
     }
-    parts.push(el('div', { class: 'label-line', style: { marginBottom: '8px' } }, `${t.chapters} ${t.chapters === 1 ? 'chapter' : 'chapters'} · ${duration(t.seconds)}`), list);
+    parts.push(el('div', { class: 'label-line', style: { marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '10px' } },
+      el('span', { text: `${t.chapters} ${t.chapters === 1 ? 'chapter' : 'chapters'} · ${duration(t.seconds)}` }),
+      t.kind === 'custom' ? el('button', { class: 'btn btn-ghost btn-small', style: { marginLeft: 'auto' }, onclick: () => editChapterNames(t, tonie) }, icon('edit'), 'Rename chapters') : null), list);
   }
 
   const action = (color, iconName, title, text, onClick, wide) =>
@@ -686,6 +694,36 @@ function renameTonie(tonie) {
   }));
 }
 
+/* rename the chapters of a home-made tonie */
+function editChapterNames(t, gridItem) {
+  const names = [];
+  for (let i = 0; i < t.chapters; i++) {
+    names.push(t.chapterTitles?.[i] || `Chapter ${i + 1}`);
+  }
+  const inputs = names.map((name, i) => el('input', { class: 'input', value: name, maxlength: 80, 'aria-label': `Chapter ${i + 1}` }));
+  const close = openLayer(dialog({
+    title: 'Rename chapters',
+    small: true,
+    body: el('div', {}, inputs.map((input, i) => el('div', { class: 'field' }, el('label', { text: `Chapter ${i + 1}` }), input))),
+    foot: el('div', { class: 'right' },
+      el('button', { class: 'btn btn-ghost', onclick: () => close() }, 'Cancel'),
+      el('button', {
+        class: 'btn btn-primary', onclick: async () => {
+          try {
+            await post(`/cards/${t.cardId}/tonies/${t.uid}/chapters/names`, { names: inputs.map((input, i) => input.value.trim() || `Chapter ${i + 1}`) });
+            close();
+            closeLayer();
+            pop();
+            loadTonies();
+            openTonie(gridItem);
+          } catch (error) {
+            toast(error.message, 'bad');
+          }
+        }
+      }, icon('check'), 'Save'))
+  }));
+}
+
 /* ---------- emoji and color picker ---------- */
 
 const emojis = [
@@ -722,7 +760,11 @@ function lookPicker(look, onChange = () => {}) {
   });
   const pickEmoji = emoji => { look.emoji = emoji; look.usePhoto = false; draw(); onChange(); pop(); };
   const draw = () => {
-    put(emojiGrid, ...emojis.map(e => el('button', {
+    const artButtons = characters.map(name => el('button', {
+      class: `art-choice ${!look.usePhoto && look.emoji === 'art:' + name ? 'on' : ''}`, type: 'button', 'aria-label': name, html: character(name, 42),
+      onclick: () => pickEmoji('art:' + name)
+    }));
+    put(emojiGrid, ...artButtons, ...emojis.map(e => el('button', {
       class: !look.usePhoto && e === look.emoji ? 'on' : '', type: 'button', 'aria-label': e, text: e,
       onclick: () => pickEmoji(e)
     })));
@@ -1693,6 +1735,83 @@ async function eraseDisk(disk, closeDialog) {
   }
 }
 
+/* ---------- the official tonie catalog (a visual reference) ---------- */
+
+async function openLibrary() {
+  let language = '';
+  let query = '';
+  let offset = 0;
+  let total = 0;
+  const results = el('div', { class: 'source-list' });
+  const count = el('div', { class: 'hint', style: { margin: '4px 0 8px' } }, 'Loading the catalog…');
+  const filters = el('div', { class: 'filters', style: { marginBottom: '10px' } });
+  const search = el('input', { type: 'search', class: 'input', placeholder: 'Search 6,000+ tonies by name or item number', autofocus: true });
+  const more = el('button', { class: 'btn btn-soft', style: { margin: '12px auto 0', display: 'none' }, onclick: () => load(false) }, icon('plus'), 'Show more');
+
+  function row(item) {
+    const chapters = el('ol', { class: 'chapters', hidden: true });
+    const chev = el('span', { class: 'i chev', html: icons.next });
+    const img = el('img', { class: 'lib-thumb', alt: '', loading: 'lazy', src: item.image ? `/api/image?url=${encodeURIComponent(item.image)}` : '' });
+    img.addEventListener('error', () => img.replaceWith(el('span', { class: 'lib-thumb i', html: icons.music, style: { color: 'var(--purple)' } })));
+    const sub = [item.episode && item.episode !== item.series ? item.episode : '', language ? '' : (languages[item.language?.toLowerCase()] || item.language || ''),
+      `${item.tracks.length} ${item.tracks.length === 1 ? 'chapter' : 'chapters'}`, item.article ? '#' + item.article : ''].filter(Boolean).join(' · ');
+    let shown = false;
+    const toggle = () => {
+      if (!item.tracks.length) return;
+      chapters.hidden = !chapters.hidden;
+      chev.style.transform = chapters.hidden ? '' : 'rotate(90deg)';
+      if (shown) return;
+      shown = true;
+      put(chapters, item.tracks.map((title, i) => el('li', {}, el('span', { class: 'num', text: i + 1 }), el('span', { class: 'name', text: title, title }))));
+    };
+    return el('div', { class: 'source' },
+      el('div', { class: 'source-head', style: { cursor: item.tracks.length ? 'pointer' : 'default' }, onclick: toggle },
+        item.image ? img : el('span', { class: 'lib-thumb i', html: icons.music, style: { color: 'var(--purple)' } }),
+        el('div', { class: 'info' }, el('b', { text: item.series, title: item.series }), el('span', { text: sub })),
+        item.tracks.length ? chev : null),
+      chapters);
+  }
+
+  async function load(reset) {
+    if (reset) {
+      offset = 0;
+      put(results);
+    }
+    more.style.display = 'none';
+    if (reset) count.textContent = 'Searching…';
+    let data;
+    try {
+      data = await api(`/library/search?q=${encodeURIComponent(query)}&lang=${encodeURIComponent(language)}&offset=${offset}&limit=60`);
+    } catch (error) {
+      count.textContent = error.message;
+      return;
+    }
+    total = data.total;
+    results.append(...data.items.map(row));
+    offset += data.items.length;
+    count.textContent = total ? `${total.toLocaleString()} ${total === 1 ? 'tonie' : 'tonies'}${query || language ? ' found' : ' in the catalog'}` : `Nothing found${query ? ` for “${query}”` : ''}.`;
+    more.style.display = offset < total ? '' : 'none';
+  }
+
+  let timer;
+  search.addEventListener('input', () => { clearTimeout(timer); query = search.value; timer = setTimeout(() => load(true), 300); });
+
+  openLayer(dialog({
+    title: 'Tonie library',
+    subtitle: 'Every official tonie — a visual reference, with item numbers and chapter names',
+    body: el('div', {}, el('label', { class: 'search', style: { display: 'flex', marginBottom: '10px' } }, icon('search'), search), filters, count, results, el('div', { style: { display: 'flex' } }, more))
+  }));
+
+  try {
+    const langs = await api('/library/languages');
+    const chip = (code, label) => el('button', { class: `chip ${language === code ? 'on' : ''}`, onclick: () => { language = code; [...filters.children].forEach(n => n.classList.remove('on')); filters.querySelector(`[data-lang="${code}"]`)?.classList.add('on'); load(true); }, dataset: { lang: code } }, label);
+    put(filters, chip('', 'All'), ...langs.slice(0, 6).map(l => chip(l.language, `${languages[l.language.toLowerCase()] || l.language} ${l.count}`)));
+  } catch (error) {
+    /* the filter is a bonus */
+  }
+  load(true);
+}
+
 /* ---------- settings ---------- */
 
 function openSettings() {
@@ -1817,6 +1936,7 @@ function start() {
   document.querySelectorAll('[data-icon]').forEach(node => { node.innerHTML = icons[node.dataset.icon]; });
   $('#make-button').addEventListener('click', event => { sparkle(event.currentTarget); openMake(); });
   $('#shelf-button').addEventListener('click', openShelf);
+  $('#library-button').addEventListener('click', openLibrary);
   $('#settings-button').addEventListener('click', openSettings);
   renderMain();
   refresh();
