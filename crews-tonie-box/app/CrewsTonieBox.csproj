@@ -13,6 +13,10 @@
     <IsTransformWebConfigDisabled>true</IsTransformWebConfigDisabled>
     <StaticWebAssetsEnabled>false</StaticWebAssetsEnabled>
     <DebugType>embedded</DebugType>
+    <!-- a smaller download: leave out the parts of .NET the app never uses (only when publishing) -->
+    <PublishTrimmed>true</PublishTrimmed>
+    <TrimMode>partial</TrimMode>
+    <JsonSerializerIsReflectionEnabledByDefault>true</JsonSerializerIsReflectionEnabledByDefault>
     <!-- teddy's sources, fetched and patched by build.sh -->
     <TeddySrc Condition="'$(TeddySrc)' == ''">$(MSBuildThisFileDirectory)../build/teddy-src</TeddySrc>
     <NativeDir Condition="'$(NativeDir)' == ''">$(MSBuildThisFileDirectory)../build/native</NativeDir>

@@ -43,7 +43,7 @@ with its audio engine rebuilt and its bugs fixed.
 | Concentus, a C# port of libopus 1.1 | libopus 1.6.1, built from source for each platform (faster and cleaner, especially at low bit rates); Concentus stays as a fallback |
 | MP3 and Ogg, anything else only through Windows codecs | Everything listed above, on macOS through its own decoders (`afconvert`), elsewhere through `ffmpeg` |
 | Windows only | Native on Apple Silicon (and Intel Macs and Linux with `build.sh`) |
-| `teddy -m info` showed chapter lengths shifted by one page | Exact lengths |
+| `teddy -m info` showed chapter lengths shifted by one page, and `-f json` printed invalid JSON | Exact lengths, valid JSON |
 
 The Toniebox's file layout is unchanged: a 4 KiB header, then an Ogg Opus stream in 4 KiB pages,
 48 kHz stereo. [`tests/validate_tonie.py`](tests/validate_tonie.py) checks every rule of it

@@ -1,5 +1,5 @@
 diff --git a/Teddy/Program.cs b/Teddy/Program.cs
-index 8b54bd6..da8e6bd 100644
+index 8b54bd6..4088bfd 100644
 --- a/Teddy/Program.cs
 +++ b/Teddy/Program.cs
 @@ -36,6 +36,7 @@ using System.Collections.Generic;
@@ -32,6 +32,15 @@ index 8b54bd6..da8e6bd 100644
                  return;
              }
  
+@@ -403,7 +407,7 @@ namespace Teddy
+                             {
+                                 StringBuilder message = new StringBuilder();
+ 
+-                                TonieTools.DumpInfo(message, dumpFormat, file, TonieInfos);
++                                TonieTools.DumpInfo(message, dumpFormat, file, TonieInfos, null, first);
+ 
+                                 Console.Write(message.ToString());
+                             }
 @@ -749,6 +753,30 @@ distributed under the License is distributed on an 'AS IS' BASIS,
  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  See the License for the specific language governing permissions and
@@ -92,10 +101,10 @@ index 8b54bd6..da8e6bd 100644
              Console.WriteLine("Options:");
              p.WriteOptionDescriptions(Console.Out);
 diff --git a/Teddy/Teddy.csproj b/Teddy/Teddy.csproj
-index 9c9059d..110307a 100644
+index 9c9059d..8ca577b 100644
 --- a/Teddy/Teddy.csproj
 +++ b/Teddy/Teddy.csproj
-@@ -1,11 +1,17 @@
+@@ -1,11 +1,20 @@
  ﻿<Project Sdk="Microsoft.NET.Sdk">
    <PropertyGroup>
 -    <TargetFramework>net48</TargetFramework>
@@ -110,6 +119,9 @@ index 9c9059d..110307a 100644
 +  <!-- cross-platform build, e.g. for macOS: dotnet publish -f net10.0 -r osx-arm64 -->
 +  <PropertyGroup Condition="'$(TargetFramework)' == 'net10.0'">
 +    <AssemblyName>teddy</AssemblyName>
++    <!-- self-contained builds leave out the parts of .NET teddy never uses -->
++    <PublishTrimmed>true</PublishTrimmed>
++    <TrimMode>partial</TrimMode>
 +  </PropertyGroup>
    <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Debug|x64'">
      <OutputPath>bin\x64\Debug\</OutputPath>
@@ -2624,9 +2636,27 @@ index 0000000..7ebdfb5
 +    }
 +}
 diff --git a/TonieAudio/TonieTools.cs b/TonieAudio/TonieTools.cs
-index 2926cdb..5d9cfd7 100644
+index 2926cdb..022d57e 100644
 --- a/TonieAudio/TonieTools.cs
 +++ b/TonieAudio/TonieTools.cs
+@@ -79,7 +79,8 @@ namespace TonieFile
+             public string Pic;
+         }
+ 
+-        public static bool DumpInfo(StringBuilder message, eDumpFormat dumpFormat, string file, TonieData[] tonieInfos, string customName = null)
++        /* first: the first entry of a JSON list, the ones after it start with a comma */
++        public static bool DumpInfo(StringBuilder message, eDumpFormat dumpFormat, string file, TonieData[] tonieInfos, string customName = null, bool first = true)
+         {
+             try
+             {
+@@ -99,7 +100,6 @@ namespace TonieFile
+                     id += 0x50000000;
+                 }
+                 var date = DateTimeOffset.FromUnixTimeSeconds(id);
+-                bool first = false;
+ 
+                 switch (dumpFormat)
+                 {
 @@ -173,6 +173,15 @@ namespace TonieFile
                              }
  
