@@ -240,10 +240,13 @@ function startApp(work) {
     await page.waitForSelector('.source-list .source', { timeout: 15000 });
     const libRows = await page.locator('.source-list .source').count();
     check(libRows > 5, `the library shows the catalog (${libRows} rows)`);
+    // typing is debounced 300 ms and then clears the list while it fetches, so wait for the
+    // search response and the re-render rather than a fixed delay (which raced on slower runners)
     await page.fill('.dialog input[type=search]', 'grimm');
-    await page.waitForTimeout(700);
+    await page.waitForResponse(r => /[?&]q=grimm/i.test(r.url()) && r.url().includes('/library/search') && r.ok(), { timeout: 15000 });
+    const narrowed = await page.waitForFunction(() => document.querySelectorAll('.source-list .source').length >= 1, { timeout: 8000 }).then(() => true, () => false);
     const found = await page.locator('.source-list .source').count();
-    check(found >= 1 && found <= 60, `searching the library narrows it (${found})`);
+    check(narrowed && found >= 1 && found <= 60, `searching the library narrows it (${found})`);
     await page.locator('.source .source-head').first().click();
     check(await page.waitForSelector('.source .chapters li', { timeout: 8000 }).then(() => true, () => false), 'a catalog item shows its chapter names');
     await shot('library');
