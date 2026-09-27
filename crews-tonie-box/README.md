@@ -25,6 +25,9 @@ with its audio engine rebuilt and its bugs fixed.
 | **Make a tonie** | Three steps: pick the tonie (its tag), add sounds, name it. MP3, M4A/AAC, Apple Lossless, voice memos, WAV (also 24-bit/float), AIFF, FLAC, CAF, Ogg Vorbis and Opus, or whole folders. Drag files anywhere onto the window, reorder chapters by dragging, name each chapter. |
 | **Custom playlists** | Build a new tonie from a mix of sources — pull individual chapters out of tonies already on the card or shelf, add your own files and recordings, and drag them all into the order you want. |
 | **Record a story** | Record your voice right in the app, listen to it, and add it as a chapter. |
+| **Free audiobooks** | Search [LibriVox](https://librivox.org) (public-domain audiobooks read by volunteers) by title or author and add chapters straight into a tonie. Downloads are limited to LibriVox/archive.org, so it stays a public-domain importer. |
+| **Set up a new card** | A Toniebox card is a plain microSD with a `CONTENT` folder, and one card holds as many tonies as it has room for. "Prepare a card" adds `CONTENT` to a blank FAT32/exFAT card; on macOS, "Erase & format" wipes a blank card to FAT32 (behind a typed confirmation). |
+| **Read a tag with a reader** | If a [Proxmark3](https://github.com/RfidResearchGroup/proxmark3) (or another ISO 15693 reader) is connected, "Scan a tag" reads a tag's ID so you can put custom stories on a blank NFC tag without opening a figurine. It only reads the ID — it never clones tonies you don't own. |
 | **A picture for each tonie** | Pick from a large set of original characters (animals, fairies, robots, vehicles, space, castles…) and colors, or use your own photo — a snap of the figurine or of your child. No third-party character artwork is bundled. |
 | **Nothing gets lost** | Before anything on the card is replaced or removed, a copy goes to *My shelf*. Tonies are written next to the old file, read back, compared and only then swapped in. Like TeddyBench, it keeps the tonie's audio ID by default, which helps an online Toniebox keep your stories. |
 | **My shelf** | Copies, and tonies made for later. Listen to them, put them on any tag, or save them as songs. |
@@ -104,9 +107,29 @@ node tests/ui_tour.js --app build/publish-osx-arm64/app/CrewsTonieBox --teddy bu
   songs, cancelling and removing.
 - [`tests/ui_tour.js`](tests/ui_tour.js) clicks through the app in a real browser engine and
   saves a screenshot of every step.
+- [`tests/import_test.py`](tests/import_test.py), [`tests/nfc_test.py`](tests/nfc_test.py) and
+  [`tests/disks_test.py`](tests/disks_test.py) cover the LibriVox import, the tag reader and the
+  card prepare/format against local mocks (`CTB_LIBRIVOX_API`, `CTB_NFC_CMD`, `CTB_DISKUTIL`), so
+  they need no internet, no reader and erase nothing real.
 - The [workflow](../.github/workflows/crews-tonie-box.yml) runs all of it on Linux, then tests
   the zip built on Linux on an Apple Silicon Mac: its signature, the tests in WebKit, and the
   real app window.
+
+## Hardware, cards and tags
+
+- **Cards.** Toniebox cards are plain microSD formatted **FAT32** with a `CONTENT` folder. Any
+  blank FAT32/exFAT card works after "Prepare a card"; very large cards are safest reformatted to
+  FAT32, which the app can do on macOS. Whether the box accepts a given size depends on its
+  firmware — the official card is small, and community reports vary for larger ones.
+- **Tags.** Tonie figurines use **ISO 15693** NFC tags (8-byte UID starting `E0 04`), *not* the
+  ISO 14443 / NTAG that most cheap USB readers and phones handle. A **Proxmark3** reads them
+  (`hf 15`); a plain PN532/ACR122U generally cannot. The app only ever **reads** a tag's ID, to
+  target the right `CONTENT` folder — it does not write or clone tags. To use your own audio,
+  put a blank ISO 15693 tag under a figurine (or reuse a Creative-Tonie) and let the box learn
+  its ID; you never have to open an official tonie. You can also just type the ID by hand.
+- **Untested here.** The tag reader and the erase/format path can't be exercised in CI without
+  real hardware, so their logic is tested against mocks and the live paths are verified by you on
+  your Mac. Set `CTB_NFC_CMD` if your reader needs a custom command.
 
 ## The command-line tool
 

@@ -37,6 +37,8 @@ public static class Program
         var shelf = new Shelf(paths);
         var covers = new Covers(paths);
         var import = new Import(http, staging);
+        var nfc = new Nfc();
+        var disks = new Disks(cards);
         var jobs = new Jobs();
         var workshop = new Workshop(paths, cards, library, staging, shelf, covers, settings);
         var previews = new Previews();
@@ -89,7 +91,7 @@ public static class Program
         app.UseDefaultFiles(new DefaultFilesOptions { FileProvider = files });
         app.UseStaticFiles(new StaticFileOptions { FileProvider = files });
 
-        Api.Map(app, new Api.Context(paths, settings, db, library, cards, staging, shelf, covers, import, jobs, workshop, previews, bridge, quit));
+        Api.Map(app, new Api.Context(paths, settings, db, library, cards, staging, shelf, covers, import, nfc, disks, jobs, workshop, previews, bridge, quit));
 
         app.StartAsync().GetAwaiter().GetResult();
         string url = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.First();

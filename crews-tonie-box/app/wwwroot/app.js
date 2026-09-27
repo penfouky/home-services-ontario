@@ -754,6 +754,27 @@ function targetPicker(selected, onPick, { allowMac = true, excludeUid } = {}) {
   const tonies = (state.tonies || []).filter(t => t.uid !== excludeUid);
   const uidInput = el('input', { class: 'input', placeholder: 'Like E0:04:03:50:1E:E9:18:F2', value: selected.type === 'new' ? selected.uid : '', 'aria-label': 'Tag ID' });
   const uidHint = el('div', { class: 'hint', text: 'The tag ID has 16 letters and numbers. Apps like “NFC Tools” on a phone can read it from the tonie.' });
+  const scan = async event => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    const label = button.querySelector('.scan-label');
+    const before = label.textContent;
+    label.textContent = 'Hold a tag to the reader…';
+    try {
+      const result = await post('/nfc/read');
+      if (result.uid) {
+        uidInput.value = result.pretty;
+        uidInput.dispatchEvent(new Event('input'));
+        pop();
+      } else {
+        toast('No tag was read. Hold it flat on the reader and try again.', 'bad', 5000);
+      }
+    } catch (error) {
+      toast(error.message, 'bad');
+    }
+    label.textContent = before;
+    button.disabled = false;
+  };
   const draw = () => {
     const cards = tonies.map(t => el('button', {
       class: `pick ${selected.type === 'tag' && selected.uid === t.uid ? 'on' : ''}`, type: 'button',
@@ -764,7 +785,10 @@ function targetPicker(selected, onPick, { allowMac = true, excludeUid } = {}) {
       current && tonies.length ? el('div', { class: 'pick-grid' }, cards) : null,
       current && !tonies.length ? el('div', { class: 'note info' }, icon('info'), 'No tags on this card yet. Put a tonie on the Toniebox once, then its tag shows up here. Or type the tag ID below.') : null,
       current ? el('div', { class: 'or', text: 'or a tag by its ID' }) : null,
-      current ? el('div', { class: 'field' }, uidInput, uidHint) : null,
+      current ? el('div', { class: 'field' },
+        state.app?.nfc?.available ? el('button', { class: 'btn btn-soft', type: 'button', style: { marginBottom: '10px' }, onclick: scan },
+          icon('tag'), el('span', { class: 'scan-label', text: `Scan a tag with the ${state.app.nfc.tool}` })) : null,
+        uidInput, uidHint) : null,
       allowMac ? el('div', { class: 'or', text: current ? 'or' : 'no SD card right now' }) : null,
       allowMac ? el('div', { class: 'choice-row' }, el('button', {
         class: `choice ${selected.type === 'mac' ? 'on' : ''}`, type: 'button',
@@ -1591,6 +1615,84 @@ function putOnTag(item, after) {
   }));
 }
 
+/* ---------- setting up a new microSD card ---------- */
+
+async function prepareCard() {
+  try {
+    let body = {};
+    if (!state.app.dialogs) {
+      const path = await askText({ title: 'Prepare a card', label: 'The card’s folder', placeholder: '/Volumes/…', ok: 'Prepare' });
+      if (path === null) return;
+      body = { path };
+    }
+    const result = await post('/disks/prepare', body);
+    if (result.ok) {
+      toast(result.message, 'good');
+      pop();
+      refresh();
+    } else if (result.message !== 'No card chosen.') {
+      toast(result.message, 'bad', 6000);
+    }
+  } catch (error) {
+    toast(error.message, 'bad');
+  }
+}
+
+async function openFormatDialog() {
+  const body = el('div', {}, el('div', { class: 'empty' }, el('span', { class: 'spinner' })));
+  const close = openLayer(dialog({
+    title: 'Erase & format a card',
+    subtitle: 'This wipes everything on the card, then formats it for the Toniebox',
+    body,
+    foot: el('div', { class: 'right' }, el('button', { class: 'btn btn-ghost', onclick: () => close() }, 'Close'))
+  }));
+  let data;
+  try {
+    data = await api('/disks');
+  } catch (error) {
+    put(body, el('div', { class: 'note bad' }, icon('info'), error.message));
+    return;
+  }
+  if (!data.disks.length) {
+    put(body, el('div', { class: 'note info' }, icon('info'), 'No removable card found. Put a microSD card in (with a reader if needed) and reopen this.'));
+    return;
+  }
+  put(body,
+    el('div', { class: 'note bad' }, icon('info'), 'Pick carefully. Everything on the card you choose is erased for good.'),
+    el('div', { class: 'source-list' }, data.disks.map(disk => {
+      const confirm = el('input', { class: 'input', placeholder: 'Type ERASE to confirm', 'aria-label': 'Type ERASE to confirm' });
+      const button = el('button', { class: 'btn btn-danger btn-small', disabled: true, onclick: () => eraseDisk(disk, close) }, icon('trash'), 'Erase');
+      confirm.addEventListener('input', () => { button.disabled = confirm.value.trim().toUpperCase() !== 'ERASE'; });
+      return el('div', { class: 'source' }, el('div', { class: 'source-head', style: { cursor: 'default' } },
+        el('span', { class: 'i', html: icons.sd, style: { width: '28px', height: '28px', color: 'var(--purple)' } }),
+        el('div', { class: 'info' }, el('b', { text: disk.name || disk.id }),
+          el('span', { text: `${bytes(disk.size)}${disk.hasContent ? ' · has tonies on it' : ''}` })),
+        el('div', { style: { display: 'flex', gap: '8px', alignItems: 'center' } }, confirm, button)));
+    })));
+}
+
+async function eraseDisk(disk, closeDialog) {
+  const ok = await confirmBox({
+    title: `Erase “${disk.name || disk.id}”?`,
+    text: `Everything on this ${bytes(disk.size)} card is erased and it is formatted fresh for the Toniebox. This cannot be undone.`,
+    ok: 'Erase the card', danger: true
+  });
+  if (!ok) return;
+  try {
+    const result = await follow(await post('/disks/format', { id: disk.id, label: childName(), confirm: disk.id }));
+    if (result.ok) {
+      toast('The card is formatted and ready for tonies.', 'good');
+      chime();
+      closeDialog();
+      refresh();
+    } else {
+      toast(result.message || 'The card was formatted. Put it back in to use it.', 'bad', 7000);
+    }
+  } catch (error) {
+    toast(error.message, 'bad', 7000);
+  }
+}
+
 /* ---------- settings ---------- */
 
 function openSettings() {
@@ -1667,6 +1769,13 @@ function openSettings() {
           }, icon('shelf'), 'Save all')) : null,
         current ? el('div', { class: 'switch-row' }, el('span', {}, 'Open the card in Finder', el('small', { text: 'For grown-ups who like to peek.' })),
           el('button', { class: 'btn btn-soft btn-small', onclick: () => post(`/cards/${current.id}/reveal`) }, icon('finder'), 'Open')) : null),
+      el('div', { class: 'settings-section' },
+        el('h3', { text: 'Set up a new card' }),
+        el('p', { class: 'about', style: { marginTop: 0 } }, 'A Toniebox card is an ordinary microSD card with a CONTENT folder. One card holds as many tonies as it has room for.'),
+        el('div', { class: 'switch-row' }, el('span', {}, 'Prepare a card', el('small', { text: 'Adds the CONTENT folder to a blank card that is already FAT32/exFAT.' })),
+          el('button', { class: 'btn btn-soft btn-small', onclick: prepareCard }, icon('sd'), 'Prepare a card')),
+        state.app.format ? el('div', { class: 'switch-row' }, el('span', {}, 'Erase & format a card', el('small', { text: 'Wipes a blank card and formats it to FAT32 for the Toniebox. Everything on it is lost.' })),
+          el('button', { class: 'btn btn-soft btn-small', onclick: openFormatDialog }, icon('broom'), 'Erase a card…')) : null),
       el('div', { class: 'settings-section about' },
         el('h3', { text: 'About' }),
         el('p', {}, `Crew's Tonie Box ${state.app.version} · audio by ${state.app.encoder}`),

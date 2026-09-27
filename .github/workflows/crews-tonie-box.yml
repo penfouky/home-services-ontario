@@ -52,6 +52,11 @@ jobs:
         run: tests/e2e.sh build/publish-linux-x64/teddy/teddy
       - name: App API test
         run: python tests/api_test.py build/publish-linux-x64/app/CrewsTonieBox build/publish-linux-x64/teddy/teddy build/toniesV2.json
+      - name: Import, NFC and SD-card tests
+        run: |
+          python tests/import_test.py build/publish-linux-x64/app/CrewsTonieBox
+          python tests/nfc_test.py build/publish-linux-x64/app/CrewsTonieBox
+          python tests/disks_test.py build/publish-linux-x64/app/CrewsTonieBox
       - name: App UI test (Chromium)
         run: node tests/ui_tour.js --app build/publish-linux-x64/app/CrewsTonieBox --teddy build/publish-linux-x64/teddy/teddy --tonies-json build/toniesV2.json --browser chromium --out screenshots-chromium
 
@@ -126,6 +131,12 @@ jobs:
         run: tests/e2e.sh from-linux/teddy/teddy
       - name: App API test (built on Linux)
         run: python tests/api_test.py "from-linux/Crew's Tonie Box.app/Contents/MacOS/CrewsTonieBox" from-linux/teddy/teddy from-linux/toniesV2.json
+      - name: Import, NFC and SD-card tests (built on Linux)
+        run: |
+          app="from-linux/Crew's Tonie Box.app/Contents/MacOS/CrewsTonieBox"
+          python tests/import_test.py "$app"
+          python tests/nfc_test.py "$app"
+          python tests/disks_test.py "$app"
       - name: App UI test (WebKit, the engine of the app's window)
         run: node tests/ui_tour.js --app "from-linux/Crew's Tonie Box.app/Contents/MacOS/CrewsTonieBox" --teddy from-linux/teddy/teddy --tonies-json from-linux/toniesV2.json --browser webkit --out screenshots-webkit
       - name: Open the real app window

@@ -9,7 +9,7 @@ namespace CrewsTonieBox;
 public static class Api
 {
     public record Context(AppPaths Paths, JsonStore<Settings> Settings, TonieDb Db, Library Library, Cards Cards, Staging Staging,
-        Shelf Shelf, Covers Covers, Import Import, Jobs Jobs, Workshop Workshop, Previews Previews, WindowBridge Bridge, CancellationTokenSource Quit);
+        Shelf Shelf, Covers Covers, Import Import, Nfc Nfc, Disks Disks, Jobs Jobs, Workshop Workshop, Previews Previews, WindowBridge Bridge, CancellationTokenSource Quit);
 
     public record RenameBody(string Title, string Emoji, string Color, string Picture);
     public record NameBody(string Name);
@@ -17,6 +17,7 @@ public static class Api
     public record TargetBody(string CardId, string Uid);
     public record PathBody(string Path);
     public record ImportBody(string Url, string Title);
+    public record FormatDiskBody(string Id, string Label, string Confirm);
 
     private static readonly FileExtensionContentTypeProvider ContentTypes = new();
 
@@ -37,6 +38,8 @@ public static class Api
                 m4a = AppInfo.IsMac && File.Exists("/usr/bin/afconvert"),
                 convert = AudioInput.CanConvert(),
                 import = c.Import.Enabled,
+                nfc = c.Nfc.Status(),
+                format = c.Disks.CanFormat,
                 formats = AudioInput.Extensions,
                 shelf = c.Shelf.Folder,
                 exports = c.Paths.Exports
@@ -311,6 +314,44 @@ public static class Api
                 type = "application/octet-stream";
             }
             return Results.File(file.Path, type, enableRangeProcessing: true);
+        });
+
+        /* ---- setting up a plain microSD card ---- */
+
+        api.MapGet("/disks", () => Results.Ok(new { canFormat = c.Disks.CanFormat, disks = c.Disks.List() }));
+
+        api.MapPost("/disks/prepare", async (PathBody body) =>
+        {
+            string folder = body?.Path ?? await c.Bridge.PickFolderAsync("Choose the blank SD card");
+            if (folder == null)
+            {
+                return Results.Ok(new { ok = false, message = "No card chosen." });
+            }
+            var (ok, message, cardId) = c.Disks.Prepare(folder);
+            return Results.Ok(new { ok, message, cardId });
+        });
+
+        api.MapPost("/disks/format", (FormatDiskBody body) =>
+        {
+            if (!c.Disks.CanFormat)
+            {
+                return Results.BadRequest(new { error = "Formatting a card is only available on a Mac." });
+            }
+            return Results.Ok(c.Jobs.Start("format", "Formatting a card", job => c.Disks.FormatAsync(job, body.Id, body.Label, body.Confirm)));
+        });
+
+        /* ---- reading a tag from an NFC reader ---- */
+
+        api.MapGet("/nfc/status", () => Results.Ok(c.Nfc.Status()));
+
+        api.MapPost("/nfc/read", async (CancellationToken cancel) =>
+        {
+            string uid = await c.Nfc.ReadUidAsync(cancel);
+            if (uid == null)
+            {
+                return Results.Ok(new { uid = (string)null });
+            }
+            return Results.Ok(new { uid, pretty = Uid.Pretty(uid), tonieLike = Uid.LooksLikeTonie(uid) });
         });
 
         /* ---- free, public-domain audio (LibriVox) ---- */
