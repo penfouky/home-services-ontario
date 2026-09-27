@@ -65,7 +65,7 @@ Files here: `docker-compose.yml` (the three services), `Caddyfile` (HTTPS + the 
 - A VPS with a public IP, Docker, and the Docker Compose plugin
   ([install docs](https://docs.docker.com/engine/install/)).
 - A domain or subdomain you control — your "colada builds" URL. Point its **A record**
-  (and **AAAA** if you have IPv6) at the VPS. Example used below: `tc.coladabuilds.com`.
+  (and **AAAA** if you have IPv6) at the VPS. This project uses `tonie.coladabuilds.com`.
 - Ports **80, 443, 8443** open to the internet on the VPS firewall; keep everything else
   closed.
 
