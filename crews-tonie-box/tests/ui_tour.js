@@ -174,7 +174,8 @@ function startApp(work) {
     await page.locator('.source .source-head').first().click();
     await page.waitForSelector('.source .chapters li .btn');
     await page.locator('.source .chapters li .btn', { hasText: /^Add$/ }).first().click();
-    await page.waitForTimeout(600);
+    // wait for that chapter to finish staging (its button turns into "Added") before closing
+    await page.locator('.source .chapters li .btn', { hasText: /^Added$/ }).first().waitFor({ timeout: 15000 });
     await page.locator('.dialog .btn-primary', { hasText: 'Done' }).click();
     await page.waitForFunction(() => document.querySelectorAll('.track').length === 3 && !document.querySelector('.track.uploading'), null, { timeout: 20000 });
     check(await page.locator('.track').count() === 3, 'a chapter from another tonie joins the playlist');
@@ -193,8 +194,8 @@ function startApp(work) {
     check(done, 'the magic finishes');
     await shot('make-done');
     await page.click('.dialog-foot .btn-primary');
-    await page.waitForTimeout(1500);
-    check((await titles()).includes('Test bedtime'), 'the new tonie shows up on the card');
+    const onCard = await page.waitForFunction(() => [...document.querySelectorAll('.grid .tonie-title')].some(n => n.textContent.includes('Test bedtime')), null, { timeout: 15000 }).then(() => true, () => false);
+    check(onCard, 'the new tonie shows up on the card');
 
     // a recording, where the browser can fake a microphone
     if (chromium) {
@@ -232,9 +233,10 @@ function startApp(work) {
     await shot('settings');
     await page.locator('.settings-section .input').first().fill('Mia');
     await page.locator('.settings-section .input').first().press('Tab');
-    await page.waitForTimeout(800);
+    // the header updates once the settings save returns; wait for it instead of a fixed delay
+    const named = await page.waitForFunction(() => document.getElementById('title')?.textContent === "Mia's Tonie Box", null, { timeout: 10000 }).then(() => true, () => false);
     await page.keyboard.press('Escape');
-    check((await page.locator('#title').textContent()) === "Mia's Tonie Box", 'the name shows in the title');
+    check(named, 'the name shows in the title');
 
     // the visual tonie library
     await page.click('#library-button');
