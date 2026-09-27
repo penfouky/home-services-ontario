@@ -222,7 +222,14 @@ public partial class Cards
                 items.Add(Describe(card, file));
             }
         }
-        return items.OrderBy(i => i.Kind == "custom" ? 0 : 1).ThenBy(i => i.Title, StringComparer.CurrentCultureIgnoreCase).ToList();
+        // custom (home-made) tonies first, then by title; the tag id breaks ties so tonies that
+        // share a title (e.g. several unnamed "A home-made tonie") keep a stable order across
+        // machines instead of following the filesystem's directory order
+        return items
+            .OrderBy(i => i.Kind == "custom" ? 0 : 1)
+            .ThenBy(i => i.Title, StringComparer.CurrentCultureIgnoreCase)
+            .ThenBy(i => i.Uid, StringComparer.Ordinal)
+            .ToList();
     }
 
     public TonieItem Find(Card card, string uid)

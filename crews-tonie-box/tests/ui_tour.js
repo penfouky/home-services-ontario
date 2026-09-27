@@ -135,8 +135,9 @@ function startApp(work) {
     check(await page.locator('.grid .badge-broken').count() === 1, 'the broken file is shown as needing help');
     check(await page.locator('.grid .badge-warn').count() === 1, 'the unfinished download is marked');
 
-    // a tonie up close, and listening to a chapter
-    await page.locator('.grid .tonie', { has: page.locator('.badge-custom'), hasNot: page.locator('.badge-warn') }).first().click();
+    // a tonie up close, and listening to a chapter: pick the home-made one with three chapters
+    // by its own text, not by grid position (the card also has a one-chapter home-made tonie)
+    await page.locator('.grid .tonie', { has: page.locator('.badge-custom'), hasNot: page.locator('.badge-warn'), hasText: '3 chapters' }).first().click();
     await page.waitForSelector('.drawer .chapters li');
     await shot('tonie');
     check(await page.locator('.drawer .chapters li').count() === 3, 'its three chapters are listed');
