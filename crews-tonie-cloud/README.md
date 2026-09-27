@@ -132,8 +132,15 @@ Once the box is talking to your server, from the admin UI you can:
 ## 5. Keep it safe
 
 - Only 80/443/8443 should be open. Everything else stays firewalled.
-- Also turn on **TeddyCloud's own web-UI authentication** (Settings → the auth options) as
-  a second lock behind the branded gate — the box's `:443` endpoint is internet-facing.
+- **The admin UI is what the password protects, and only the gate reaches it.** TeddyCloud's
+  own web UI (container port 80) is never published to the host — Caddy on `:8443` is the only
+  way in, and it refuses every request without a valid session (verified end to end: an
+  unauthenticated request is bounced to the login screen and never reaches TeddyCloud).
+- **The box's `:443` is internet-facing** — it has to be, so your box can reach it from home.
+  TeddyCloud has no built-in login of its own, but it *does* detect public exposure and locks
+  itself down; leave those protections on. After first boot, in **Settings** confirm the
+  public-access protection is enabled and, if offered, require the box's client certificate for
+  API requests. Don't turn on any "expose"/"allow origins: *" option.
 - Use a long `GATE_PASSWORD`. The login cookie is signed with `GATE_SECRET`
   (`openssl rand -hex 32`); keep it out of version control (`.env` is git-ignored).
 - Back up the `certs`, `config`, `content` and `library` Docker volumes.
