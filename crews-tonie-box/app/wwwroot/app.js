@@ -885,11 +885,23 @@ async function readEntry(entry) {
   return (await Promise.all(all.map(readEntry))).flat();
 }
 
-/* files and whole folders from a drop; the entries have to be taken before the first await */
-function droppedFiles(transfer) {
-  if (!transfer || ![...transfer.types].includes('Files')) return Promise.resolve([]);
+/* files and whole folders from a drop. Read the items/files views synchronously, before the
+   first await, or the browser may empty them. The entry API (webkitGetAsEntry) is what lets a
+   dropped folder be walked; if reading an entry throws — WebKit raises NotFoundError for a
+   dropped file it can't back with a real path — fall back to the plain file list. */
+async function droppedFiles(transfer) {
+  if (!transfer || ![...transfer.types].includes('Files')) return [];
   const entries = [...transfer.items].map(item => item.webkitGetAsEntry?.()).filter(Boolean);
-  return entries.length ? Promise.all(entries.map(readEntry)).then(lists => lists.flat()) : Promise.resolve([...transfer.files]);
+  const plain = [...transfer.files];
+  if (entries.length) {
+    try {
+      const files = (await Promise.all(entries.map(readEntry))).flat();
+      if (files.length) return files;
+    } catch {
+      /* fall through to the plain list below */
+    }
+  }
+  return plain;
 }
 
 /* pick chapters out of tonies already on the card or shelf, to mix into a new tonie */
