@@ -31,14 +31,21 @@ flags=(-target "$target" -O2 -fPIC -fvisibility=hidden -DOPUS_BUILD -DUSE_ALLOCA
        "-DPACKAGE_VERSION=\"$version\""
        -I"$src/include" -I"$src/celt" -I"$src/silk" -I"$src/silk/float" -I"$src/src")
 objs=() pids=()
+max=8
 for f in $sources "$here/tonie_opus.c"; do
     [[ $f == /* ]] || f=$src/$f
     o=$obj/$(echo "$f" | tr '/' '_').o
     $zig cc "${flags[@]}" -c "$f" -o "$o" &
     objs+=("$o") pids+=($!)
-    [ "$(jobs -r | wc -l)" -ge 8 ] && wait -n
+    # cap concurrency at `max`. bash's `wait -n` (wait for any job) needs 4.3+, but macOS ships
+    # bash 3.2, so instead wait for the oldest job before launching the next, and drop it from
+    # the list so it is never waited on twice (a second wait would return 127 and trip set -e).
+    if [ "${#pids[@]}" -ge "$max" ]; then
+        wait "${pids[0]}"
+        pids=("${pids[@]:1}")
+    fi
 done
-# any failed compile stops the build
+# wait for the stragglers; any failed compile stops the build (set -e)
 for pid in "${pids[@]}"; do wait "$pid"; done
 
 mkdir -p "$(dirname "$out")"
