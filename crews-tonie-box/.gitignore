@@ -1,0 +1,9 @@
+build/
+dist/
+app/bin/
+app/obj/
+app/Resources/toniesV2.json.gz
+tests/__pycache__/
+tests/node_modules/
+tests/package-lock.json
+screenshots*/

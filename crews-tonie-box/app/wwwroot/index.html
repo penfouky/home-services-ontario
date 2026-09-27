@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Crew's Tonie Box</title>
+  <link rel="icon" href="img/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="app.css">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <header class="sky" id="sky">
+    <div class="stars" aria-hidden="true"></div>
+    <div class="shooting-star" aria-hidden="true"></div>
+    <div class="moon" aria-hidden="true"></div>
+    <div class="sky-inner">
+      <div class="brand">
+        <button class="mascot-button" id="mascot" aria-label="Say hi to Teddy"></button>
+        <div>
+          <h1 class="title" id="title">Crew's Tonie Box</h1>
+          <p class="subtitle">Stories, songs &amp; sweet dreams</p>
+        </div>
+      </div>
+      <div class="sky-actions">
+        <div class="card-pill" id="card-pill" hidden></div>
+        <div class="button-row">
+          <button class="btn btn-magic" id="make-button"><span class="i" data-icon="wand"></span>Make a new tonie</button>
+          <button class="btn btn-glass" id="shelf-button"><span class="i" data-icon="shelf"></span>My shelf<span class="count" id="shelf-count" hidden></span></button>
+          <button class="btn btn-glass btn-icon" id="settings-button" aria-label="Settings"><span class="i" data-icon="gear"></span></button>
+        </div>
+      </div>
+    </div>
+    <svg class="clouds" viewBox="0 0 1440 90" preserveAspectRatio="none" aria-hidden="true">
+      <path d="M0 60 C 60 20, 140 20, 190 48 C 230 18, 320 14, 360 46 C 420 10, 520 16, 560 50 C 610 22, 700 20, 740 52 C 800 16, 900 18, 940 50 C 990 20, 1080 16, 1120 48 C 1170 18, 1270 20, 1310 52 C 1360 28, 1410 30, 1440 44 L 1440 90 L 0 90 Z"/>
+    </svg>
+  </header>
+
+  <main id="main" tabindex="-1"></main>
+
+  <div class="overlay" id="overlay" hidden></div>
+  <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+  <canvas class="confetti" id="confetti" aria-hidden="true"></canvas>
+  <audio id="player" preload="none"></audio>
+</body>
+</html>

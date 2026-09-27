@@ -1,7 +1,9 @@
 """Check decoded tonie audio against the expected sequence of test tones.
 
-usage: analyze_stream.py <stream.wav> <spec>
+usage: analyze_stream.py [--settle SECONDS] <stream.wav> <spec>
 spec: comma separated segments "seconds:freqL[/freqR]" in playback order, e.g. "8:440/1000,5:660"
+--settle: skip the level and broadband checks for the first SECONDS of the stream, where an
+          encoder may still be settling (libopus at low bit rates on synthetic stereo tones)
 
 The audio is segmented by its dominant frequency per channel. For every expected segment:
   - a segment exists, in order, with the expected frequency in each channel
@@ -39,7 +41,12 @@ def blackman_harris(n):
     return 0.35875 - 0.48829 * np.cos(k) + 0.14128 * np.cos(2 * k) - 0.01168 * np.cos(3 * k)
 
 
-path, spec = sys.argv[1], sys.argv[2]
+args = sys.argv[1:]
+settle = 0.0
+if args[0] == '--settle':
+    settle = float(args[1])
+    args = args[2:]
+path, spec = args[0], args[1]
 fs, x = read_wav(path)
 
 expected = []
@@ -91,7 +98,7 @@ for (dur, fl, fr), (lab, a, b) in zip(expected, segs):
     freq_ok = abs(lab[0] - fl) <= 20 and abs(lab[1] - fr) <= 20
     found = [tone_duration(0, fl, a, b), tone_duration(1, fr, a, b)]
     dur_ok = max(abs(d - dur) for d in found) <= 0.040
-    ia, ib = int((a + 0.04) * fs), int((b - 0.04) * fs)
+    ia, ib = int((max(a, settle) + 0.04) * fs), int((b - 0.04) * fs)
     level_dev, broadband = 0.0, -200.0
     for ch, f in ((0, fl), (1, fr)):
         frames = x[ia:ia + (ib - ia) // n * n, ch].reshape(-1, n)
