@@ -2,14 +2,15 @@
 
 usage: analyze_stream.py [--settle SECONDS] <stream.wav> <spec>
 spec: comma separated segments "seconds:freqL[/freqR]" in playback order, e.g. "8:440/1000,5:660"
---settle: skip the level and broadband checks for the first SECONDS of the stream, where an
-          encoder may still be settling (libopus at low bit rates on synthetic stereo tones)
+--settle: within the first SECONDS of the stream the level, broadband and tone-duration checks
+          allow for an encoder still ramping up (libopus at low bit rates on synthetic stereo tones)
 
 The audio is segmented by its dominant frequency per channel. For every expected segment:
   - a segment exists, in order, with the expected frequency in each channel
     (catches wrong speed/pitch from resampling and swapped channels)
   - the tone lasts as long as in the source, +-40 ms (measured on 10 ms frames, so neighbouring
-    test tones must be >= 400 Hz apart)
+    test tones must be >= 400 Hz apart); the part of a tone inside the settle window is not
+    counted, since the encoder may not be at full power there yet
   - inside it the level stays within 1.5 dB and no 10 ms frame carries broadband energy
     (catches clicks, dropouts and discontinuities)
 Exit code 1 on any failure. Needs numpy only.
@@ -87,17 +88,28 @@ ff = np.fft.rfftfreq(n, 1 / fs)
 
 
 def tone_duration(ch, f, a, b):
-    """time the tone is present around segment [a, b]: 10 ms frames holding at least half its power"""
+    """how long the tone is present around segment [a, b], as (total, settled): 10 ms frames
+    holding at least half its power, counted over the whole segment and, for `settled`, only from
+    the settle point on (before it the encoder may still be ramping up on synthetic tones)"""
     lo, hi = max(0, int((a - 0.1) * fs)), min(len(x), int((b + 0.1) * fs))
     frames = x[lo:lo + (hi - lo) // n * n, ch].reshape(-1, n)
     band = (np.abs(np.fft.rfft(frames, axis=1)) ** 2)[:, np.abs(ff - f) <= 200].sum(axis=1)
-    return np.count_nonzero(band >= np.median(band) / 2) * n / fs
+    present = band >= np.median(band) / 2
+    first = max(0, int(round((settle * fs - lo) / n)))
+    return np.count_nonzero(present) * n / fs, np.count_nonzero(present[first:]) * n / fs
 
 
+elapsed = 0.0  # nominal start of this tone on the source timeline (tones play back to back)
 for (dur, fl, fr), (lab, a, b) in zip(expected, segs):
     freq_ok = abs(lab[0] - fl) <= 20 and abs(lab[1] - fr) <= 20
     found = [tone_duration(0, fl, a, b), tone_duration(1, fr, a, b)]
-    dur_ok = max(abs(d - dur) for d in found) <= 0.040
+    # the tone lasts as long as the source, +-40 ms, but the part of it inside the settle window
+    # isn't counted (the encoder may still be ramping up there): so drop that part from the target
+    # too, using the source's own timeline rather than the ramp-shifted detected onset. A wrong
+    # playback speed still shows up, in this tone past the window and in every later tone.
+    target = dur - min(max(settle - elapsed, 0.0), dur)
+    dur_ok = max(abs(settled - target) for _, settled in found) <= 0.040
+    elapsed += dur
     ia, ib = int((max(a, settle) + 0.04) * fs), int((b - 0.04) * fs)
     level_dev, broadband = 0.0, -200.0
     for ch, f in ((0, fl), (1, fr)):
@@ -110,7 +122,7 @@ for (dur, fl, fr), (lab, a, b) in zip(expected, segs):
         broadband = max(broadband, 10 * np.log10(ratio.max() + 1e-15))
     seg_ok = freq_ok and dur_ok and level_dev <= 1.5 and broadband <= -30
     ok &= seg_ok
-    out.append(f'  {a:6.2f}-{b:6.2f}s  {lab[0]:>5}/{lab[1]:<5} Hz (want {fl:.0f}/{fr:.0f})  {found[0]:5.2f}s (want {dur:.2f})  '
+    out.append(f'  {a:6.2f}-{b:6.2f}s  {lab[0]:>5}/{lab[1]:<5} Hz (want {fl:.0f}/{fr:.0f})  {found[0][0]:5.2f}s (want {dur:.2f})  '
                f'level +-{level_dev:4.2f} dB  broadband {broadband:6.1f} dB  {"ok" if seg_ok else "FAIL"}')
 
 print('\n'.join(out))
