@@ -1,0 +1,34 @@
+{
+	email {$ACME_EMAIL}
+}
+
+# Plain HTTP: Caddy answers the Let's Encrypt challenge here automatically, and sends
+# any human who types the bare domain up to the password-protected admin UI.
+http://{$TC_DOMAIN} {
+	redir https://{$TC_DOMAIN}:8443{uri} permanent
+}
+
+# The branded, password-protected TeddyCloud admin UI.
+{$TC_DOMAIN}:8443 {
+	encode zstd gzip
+
+	# The login page and the auth check are always reachable (they must be, to log in).
+	handle /__gate/* {
+		reverse_proxy gate:8080
+	}
+
+	# Everything else requires a valid session cookie. The gate returns 200 to let it
+	# through, or a redirect to the login page when the visitor isn't signed in.
+	handle {
+		route {
+			forward_auth gate:8080 {
+				uri /__gate/verify
+			}
+			reverse_proxy teddycloud:80
+		}
+	}
+
+	log {
+		output stdout
+	}
+}

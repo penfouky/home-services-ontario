@@ -1,0 +1,78 @@
+name: crews-tonie-cloud
+
+# Three services:
+#   teddycloud  the self-hosted tonies cloud. Owns port 443, where the Toniebox connects
+#               with a client certificate. That port is NOT proxied or password-gated
+#               (mutual TLS must reach TeddyCloud directly).
+#   gate        a tiny branded login screen (see ./gate). Guards the admin UI only.
+#   caddy       terminates HTTPS for the admin UI, asks the gate before serving it, and
+#               reverse-proxies TeddyCloud's web interface. Gets a Let's Encrypt cert.
+#
+# The Toniebox uses  https://<TC_DOMAIN>:443 .  You use  https://<TC_DOMAIN>:8443 .
+
+services:
+  teddycloud:
+    image: ghcr.io/toniebox-reverse-engineering/teddycloud:latest
+    container_name: teddycloud
+    hostname: teddycloud
+    restart: unless-stopped
+    ports:
+      - "443:443"          # the Toniebox connects here — do NOT put a proxy or password in front of it
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-UTC}
+    volumes:
+      - certs:/teddycloud/certs
+      - config:/teddycloud/config
+      - content:/teddycloud/data/content
+      - library:/teddycloud/data/library
+      - custom_img:/teddycloud/data/www/custom_img
+      - firmware:/teddycloud/data/firmware
+      - cache:/teddycloud/data/cache
+      - plugins:/teddycloud/data/www/plugins
+    # The web UI (ports 80/8443 inside the container) is left unpublished on purpose:
+    # only Caddy reaches it, over the private compose network.
+
+  gate:
+    build: ./gate
+    image: crews-tonie-cloud/gate
+    container_name: ctc-gate
+    hostname: gate
+    restart: unless-stopped
+    environment:
+      - GATE_PASSWORD=${GATE_PASSWORD:?set GATE_PASSWORD in .env}
+      - GATE_SECRET=${GATE_SECRET:?set GATE_SECRET in .env (openssl rand -hex 32)}
+      - GATE_BRAND=${GATE_BRAND:-Colada Builds}
+      - GATE_TAGLINE=${GATE_TAGLINE:-Crew's Tonie Cloud}
+    expose:
+      - "8080"
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: ctc-caddy
+    hostname: caddy
+    restart: unless-stopped
+    depends_on: [gate, teddycloud]
+    ports:
+      - "80:80"            # Let's Encrypt HTTP-01 challenge, and a redirect up to the admin UI
+      - "8443:8443"        # the branded, password-protected admin UI
+    environment:
+      - TC_DOMAIN=${TC_DOMAIN:?set TC_DOMAIN in .env}
+      - ACME_EMAIL=${ACME_EMAIL:?set ACME_EMAIL in .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  certs: {}
+  config: {}
+  content: {}
+  library: {}
+  custom_img: {}
+  firmware: {}
+  cache: {}
+  plugins: {}
+  caddy_data: {}
+  caddy_config: {}
