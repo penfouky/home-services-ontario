@@ -124,6 +124,17 @@ public class Staging
         return Add(file);
     }
 
+    /* a download (e.g. a LibriVox chapter) staged with a chosen title */
+    public async Task<StagedFile> UploadNamedAsync(Stream body, string name, string title, CancellationToken cancel)
+    {
+        var staged = await UploadAsync(name, body, cancel);
+        if (!string.IsNullOrWhiteSpace(title))
+        {
+            staged.Title = title.Trim();
+        }
+        return staged;
+    }
+
     /* a chapter pulled out of an existing tonie, ready to go into a new one */
     public StagedFile AddOgg(byte[] ogg, string title, string name, double seconds)
     {

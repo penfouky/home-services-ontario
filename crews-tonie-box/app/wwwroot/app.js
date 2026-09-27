@@ -938,6 +938,135 @@ async function openChapterPicker(onAdd) {
   }));
 }
 
+/* free public-domain audiobooks (LibriVox) to import straight into a tonie */
+function openLibrivox(onAdd) {
+  const results = el('div', { class: 'source-list' });
+  const status = el('div', { class: 'hint', style: { textAlign: 'center', marginTop: '20px' } }, 'Search for a story or an author above.');
+  const search = el('input', { type: 'search', class: 'input', placeholder: 'e.g. Peter Rabbit, Grimm, Aesop', autofocus: true });
+  let seq = 0;
+
+  const run = async () => {
+    const query = search.value.trim();
+    const mine = ++seq;
+    if (!query) {
+      put(results);
+      status.hidden = false;
+      status.textContent = 'Search for a story or an author above.';
+      return;
+    }
+    status.hidden = false;
+    put(results, el('div', { class: 'empty', style: { padding: '20px' } }, el('span', { class: 'spinner' })));
+    status.textContent = '';
+    let books;
+    try {
+      books = await api(`/import/search?q=${encodeURIComponent(query)}`);
+    } catch (error) {
+      if (mine === seq) {
+        put(results);
+        status.textContent = 'Could not reach LibriVox. Check your internet.';
+      }
+      return;
+    }
+    if (mine !== seq) return;
+    put(results);
+    if (!books.length) {
+      status.textContent = `Nothing found for “${query}”. Try another word.`;
+      return;
+    }
+    status.hidden = true;
+    put(results, ...books.map(bookRow));
+  };
+
+  function bookRow(book) {
+    const chapters = el('ol', { class: 'chapters', hidden: true });
+    const chev = el('span', { class: 'i chev', html: icons.next });
+    let loaded = false;
+    const toggle = async () => {
+      if (!chapters.hidden) {
+        chapters.hidden = true;
+        chev.style.transform = '';
+        return;
+      }
+      chapters.hidden = false;
+      chev.style.transform = 'rotate(90deg)';
+      if (loaded) return;
+      loaded = true;
+      put(chapters, el('li', {}, el('span', { class: 'spinner' })));
+      let tracks;
+      try {
+        tracks = await api(`/import/${encodeURIComponent(book.id)}/tracks`);
+      } catch (error) {
+        tracks = [];
+      }
+      if (!tracks.length) {
+        put(chapters, el('li', {}, el('span', { class: 'name', text: 'Could not list the chapters.' })));
+        return;
+      }
+      const add = async (track, button) => {
+        button.disabled = true;
+        button.classList.add('loading');
+        try {
+          onAdd([await post('/import/track', { url: track.url, title: track.title })]);
+          put(button, icon('check'), 'Added');
+          pop();
+        } catch (error) {
+          button.disabled = false;
+          button.classList.remove('loading');
+          toast(error.message, 'bad', 6000);
+        }
+      };
+      const rows = [el('li', { class: 'add-all' },
+        el('span', { class: 'name', text: `All ${tracks.length} chapters` }),
+        el('button', {
+          class: 'btn btn-soft btn-small', onclick: async event => {
+            const button = event.currentTarget;
+            button.disabled = true;
+            put(button, el('span', { class: 'spinner' }), 'Getting…');
+            let n = 0;
+            for (const track of tracks) {
+              try {
+                onAdd([await post('/import/track', { url: track.url, title: track.title })]);
+                n++;
+              } catch (error) {
+                toast(error.message, 'bad', 6000);
+                break;
+              }
+            }
+            put(button, icon('check'), `Added ${n}`);
+            pop();
+          }
+        }, icon('plus'), 'Add all'))];
+      for (const track of tracks) {
+        const button = el('button', { class: 'btn btn-soft btn-small' }, icon('plus'), 'Add');
+        button.addEventListener('click', () => add(track, button));
+        rows.push(el('li', {}, el('span', { class: 'name', text: track.title, title: track.title }),
+          el('span', { class: 'len', text: track.seconds ? duration(track.seconds) : '' }), button));
+      }
+      put(chapters, ...rows);
+    };
+    return el('div', { class: 'source' },
+      el('button', { class: 'source-head', onclick: toggle },
+        el('span', { class: 'i', html: icons.music, style: { color: 'var(--purple)', width: '28px', height: '28px' } }),
+        el('div', { class: 'info' }, el('b', { text: book.title, title: book.title }),
+          el('span', { text: [book.author, `${book.sections} ${book.sections === 1 ? 'chapter' : 'chapters'}`, book.seconds ? minutes(book.seconds) : ''].filter(Boolean).join(' · ') })),
+        chev),
+      chapters);
+  }
+
+  let timer;
+  search.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(run, 350); });
+  search.addEventListener('keydown', event => { if (event.key === 'Enter') { clearTimeout(timer); run(); } });
+
+  openLayer(dialog({
+    title: 'Free audiobooks',
+    subtitle: 'Public-domain stories from LibriVox, read by volunteers',
+    body: el('div', {}, el('label', { class: 'search', style: { display: 'flex', marginBottom: '4px' } }, icon('search'), search), status, results),
+    foot: el('div', { class: 'right' },
+      el('span', { class: 'hint', style: { marginRight: 'auto' }, text: 'LibriVox recordings are in the public domain.' }),
+      el('button', { class: 'btn btn-primary', onclick: () => closeLayer() }, icon('check'), 'Done'))
+  }));
+}
+
 function openMake({ target, toMac, files } = {}) {
   const current = card();
   const make = {
@@ -1132,7 +1261,8 @@ function openMake({ target, toMac, files } = {}) {
         el('button', { class: 'btn btn-primary', onclick: pickFiles }, icon('file'), 'Choose files'),
         el('button', { class: 'btn btn-soft', onclick: pickFolder }, icon('folder'), 'Choose a folder'),
         navigator.mediaDevices?.getUserMedia ? el('button', { class: 'btn btn-soft', onclick: () => openRecorder(file => uploadFiles([file])) }, icon('mic'), 'Record my voice') : null,
-        el('button', { class: 'btn btn-soft', onclick: () => openChapterPicker(addStaged) }, icon('shelf'), 'Add from a tonie')),
+        el('button', { class: 'btn btn-soft', onclick: () => openChapterPicker(addStaged) }, icon('shelf'), 'Add from a tonie'),
+        state.app.import ? el('button', { class: 'btn btn-soft', onclick: () => openLibrivox(addStaged) }, icon('search'), 'Free audiobooks') : null),
       fileInput, folderInput);
     /* the drop itself is handled for the whole window, see the end of this file */
     zone.addEventListener('dragover', event => { if ([...event.dataTransfer.types].includes('Files')) zone.classList.add('over'); });

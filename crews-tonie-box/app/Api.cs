@@ -9,13 +9,14 @@ namespace CrewsTonieBox;
 public static class Api
 {
     public record Context(AppPaths Paths, JsonStore<Settings> Settings, TonieDb Db, Library Library, Cards Cards, Staging Staging,
-        Shelf Shelf, Covers Covers, Jobs Jobs, Workshop Workshop, Previews Previews, WindowBridge Bridge, CancellationTokenSource Quit);
+        Shelf Shelf, Covers Covers, Import Import, Jobs Jobs, Workshop Workshop, Previews Previews, WindowBridge Bridge, CancellationTokenSource Quit);
 
     public record RenameBody(string Title, string Emoji, string Color, string Picture);
     public record NameBody(string Name);
     public record FormatBody(string Format);
     public record TargetBody(string CardId, string Uid);
     public record PathBody(string Path);
+    public record ImportBody(string Url, string Title);
 
     private static readonly FileExtensionContentTypeProvider ContentTypes = new();
 
@@ -35,6 +36,7 @@ public static class Api
                 eject = AppInfo.IsMac,
                 m4a = AppInfo.IsMac && File.Exists("/usr/bin/afconvert"),
                 convert = AudioInput.CanConvert(),
+                import = c.Import.Enabled,
                 formats = AudioInput.Extensions,
                 shelf = c.Shelf.Folder,
                 exports = c.Paths.Exports
@@ -309,6 +311,39 @@ public static class Api
                 type = "application/octet-stream";
             }
             return Results.File(file.Path, type, enableRangeProcessing: true);
+        });
+
+        /* ---- free, public-domain audio (LibriVox) ---- */
+
+        api.MapGet("/import/search", async (string q, CancellationToken cancel) =>
+            Results.Ok(await c.Import.SearchAsync(q, cancel)));
+
+        api.MapGet("/import/{projectId}/tracks", async (string projectId, CancellationToken cancel) =>
+        {
+            try
+            {
+                return Results.Ok(await c.Import.TracksAsync(projectId, cancel));
+            }
+            catch (Exception)
+            {
+                return Results.Ok(new List<Import.ImportTrack>());
+            }
+        });
+
+        api.MapPost("/import/track", async (ImportBody body, CancellationToken cancel) =>
+        {
+            try
+            {
+                return Results.Ok(await c.Import.StageTrackAsync(body.Url, body.Title, cancel));
+            }
+            catch (InvalidOperationException e)
+            {
+                return Results.BadRequest(new { error = e.Message });
+            }
+            catch (Exception)
+            {
+                return Results.BadRequest(new { error = "That chapter could not be downloaded. Check your internet and try again." });
+            }
         });
 
         /* ---- pictures for your own tonies ---- */
