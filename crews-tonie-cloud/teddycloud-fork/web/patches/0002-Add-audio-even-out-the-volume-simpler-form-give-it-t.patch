@@ -1,0 +1,1362 @@
+From d7145e39fe2c53f4a9dfd3a7149d2a16bb2d2c06 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Mon, 28 Sep 2026 17:32:17 +0000
+Subject: [PATCH 2/3] Add audio: even out the volume, simpler form, give it to
+ a tonie
+
+- Loudness levelling in the browser (ITU-R BS.1770 / EBU R128, -16 LUFS like the server's loudnorm, look-ahead peak limiter at -1.5 dBFS, max +18 dB). It runs on both upload paths (browser encoding and PCM upload), so encode.normalize now applies to every upload, not just server-side conversion of library files. Measured within 0.05 LU of ffmpeg ebur128.
+- The form after picking files: file count, Sort A-Z, Name, Save in, Even out the volume, and a More options switch for browser vs server conversion; one full-width Add to library button.
+- After adding, pick the tonie that should play it: sets source=lib://..., nocloud=true and live=false in one tap.
+- Dev proxy forwards /content so tonie settings can be saved with a relative API URL.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01VdeEDs6BS9YupCSmfGg7F8
+---
+ .../tonies/encoder/AssignToTonie.tsx          | 296 ++++++++++++++
+ src/components/tonies/encoder/Encoder.tsx     | 381 +++++++++++-------
+ .../tonies/encoder/hooks/useEncoder.ts        |  48 ++-
+ src/utils/audio/audioEncoder.ts               |  23 +-
+ src/utils/audio/loudness.ts                   | 283 +++++++++++++
+ src/utils/audio/wasmEncoder.ts                |  23 +-
+ vite.config.ts                                |   6 +
+ 7 files changed, 897 insertions(+), 163 deletions(-)
+ create mode 100644 src/components/tonies/encoder/AssignToTonie.tsx
+ create mode 100644 src/utils/audio/loudness.ts
+
+diff --git a/src/components/tonies/encoder/AssignToTonie.tsx b/src/components/tonies/encoder/AssignToTonie.tsx
+new file mode 100644
+index 0000000..ae6af25
+--- /dev/null
++++ b/src/components/tonies/encoder/AssignToTonie.tsx
+@@ -0,0 +1,296 @@
++import React, { useState } from "react";
++import { useTranslation } from "react-i18next";
++import { useNavigate } from "react-router-dom";
++import styled from "styled-components";
++import { Button, Result, Spin, theme } from "antd";
++import { CheckCircleFilled, PlusOutlined } from "@ant-design/icons";
++
++import { TeddyCloudApi } from "../../../api";
++import { defaultAPIConfig } from "../../../config/defaultApiConfig";
++import { useTonies } from "../../../hooks/useTonies";
++import { useTeddyCloud } from "../../../provider/TeddyCloudProvider";
++import { NotificationTypeEnum } from "../../../types/teddyCloudNotificationTypes";
++import { TonieCardProps } from "../../../types/tonieTypes";
++import { AddedAudio } from "./hooks/useEncoder";
++
++const api = new TeddyCloudApi(defaultAPIConfig());
++const { useToken } = theme;
++
++const Panel = styled.div<{ $bg: string; $border: string }>`
++    background: ${({ $bg }) => $bg};
++    border: 1px solid ${({ $border }) => $border};
++    border-radius: 18px;
++    padding: 18px 16px;
++    margin-bottom: 16px;
++`;
++
++const Heading = styled.div`
++    display: flex;
++    gap: 12px;
++    align-items: flex-start;
++    margin-bottom: 14px;
++
++    h3 {
++        margin: 0 0 2px;
++    }
++    p {
++        margin: 0;
++    }
++`;
++
++const Grid = styled.div`
++    display: grid;
++    grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
++    gap: 10px;
++    margin-bottom: 16px;
++`;
++
++const Tile = styled.button<{
++    $selected: boolean;
++    $accent: string;
++    $bg: string;
++    $border: string;
++    $color: string;
++}>`
++    all: unset;
++    box-sizing: border-box;
++    cursor: pointer;
++    display: flex;
++    flex-direction: column;
++    align-items: center;
++    gap: 6px;
++    min-height: 44px;
++    padding: 10px 8px;
++    border-radius: 16px;
++    background: ${({ $bg }) => $bg};
++    color: ${({ $color }) => $color};
++    border: 2px solid ${({ $selected, $accent, $border }) => ($selected ? $accent : $border)};
++    box-shadow: ${({ $selected, $accent }) => ($selected ? `0 0 0 3px ${$accent}33` : "none")};
++    text-align: center;
++    font-size: 13px;
++    font-weight: 700;
++    line-height: 1.25;
++    word-break: break-word;
++    -webkit-tap-highlight-color: transparent;
++
++    img {
++        width: 72px;
++        height: 72px;
++        object-fit: contain;
++    }
++    &:focus-visible {
++        outline: 2px solid ${({ $accent }) => $accent};
++        outline-offset: 2px;
++    }
++`;
++
++const Actions = styled.div`
++    display: flex;
++    flex-wrap: wrap;
++    gap: 10px;
++
++    .ant-btn {
++        flex: 1 1 220px;
++    }
++`;
++
++const Small = styled.span<{ $color: string }>`
++    font-size: 12px;
++    font-weight: 600;
++    color: ${({ $color }) => $color};
++`;
++
++/** "lib://Stories/Bedtime.taf" -> "Bedtime" */
++const fileTitle = (source: string) =>
++    (source.split("/").pop() || source).replace(/\.(taf|tap)$/i, "");
++
++const tonieTitle = (tonie: TonieCardProps, fallback: string) =>
++    tonie.tonieInfo?.series
++        ? tonie.tonieInfo.series + (tonie.tonieInfo.episode ? ` – ${tonie.tonieInfo.episode}` : "")
++        : fallback;
++
++/**
++ * Shown after audio was added: pick the tonie that should play it, in one tap.
++ * Sets the tonie's source to the new file and makes sure it plays from this server.
++ */
++export const AssignToTonie: React.FC<{ added: AddedAudio; onAddMore: () => void }> = ({
++    added,
++    onAddMore,
++}) => {
++    const { t } = useTranslation();
++    const { token } = useToken();
++    const navigate = useNavigate();
++    const { addNotification } = useTeddyCloud();
++    const { tonies, loading } = useTonies({ merged: false, filter: "tag" });
++
++    const [selected, setSelected] = useState<TonieCardProps | null>(null);
++    const [saving, setSaving] = useState(false);
++    const [doneFor, setDoneFor] = useState<string | null>(null);
++
++    const unknown = t("tonies.unsetTonie");
++
++    const assign = async () => {
++        if (!selected) return;
++        setSaving(true);
++        try {
++            await api.apiPostTeddyCloudContentJson(
++                selected.ruid,
++                "source=" + encodeURIComponent(added.source),
++                "",
++            );
++            // play from this server, not the cloud
++            if (!selected.nocloud)
++                await api.apiPostTeddyCloudContentJson(selected.ruid, "nocloud=true", "");
++            if (selected.live)
++                await api.apiPostTeddyCloudContentJson(selected.ruid, "live=false", "");
++            setDoneFor(tonieTitle(selected, unknown));
++        } catch (error) {
++            addNotification(
++                NotificationTypeEnum.Error,
++                t("crewcloud.encoder.assignFailed", "Couldn't give the audio to that tonie"),
++                String(error ?? ""),
++                t("tonies.title"),
++            );
++        } finally {
++            setSaving(false);
++        }
++    };
++
++    if (doneFor) {
++        return (
++            <Panel
++                $bg={token.colorBgContainer}
++                $border={token.colorBorderSecondary}
++                data-testid="assign-done"
++            >
++                <Result
++                    status="success"
++                    style={{ padding: "12px 0" }}
++                    title={t("crewcloud.encoder.assignedTitle", "All set!")}
++                    subTitle={t(
++                        "crewcloud.encoder.assignedText",
++                        'Put {{tonie}} on the box to hear "{{name}}".',
++                        { tonie: doneFor, name: added.name },
++                    )}
++                    extra={
++                        <Actions>
++                            <Button
++                                type="primary"
++                                size="large"
++                                icon={<PlusOutlined />}
++                                onClick={onAddMore}
++                            >
++                                {t("crewcloud.encoder.addMore", "Add more audio")}
++                            </Button>
++                            <Button size="large" onClick={() => navigate("/tonies")}>
++                                {t("crewcloud.setup.tonie.cta", "See my tonies")}
++                            </Button>
++                        </Actions>
++                    }
++                />
++            </Panel>
++        );
++    }
++
++    return (
++        <Panel
++            $bg={token.colorBgContainer}
++            $border={token.colorBorderSecondary}
++            data-testid="assign-to-tonie"
++        >
++            <Heading>
++                <CheckCircleFilled
++                    style={{ color: token.colorSuccess, fontSize: 28, marginTop: 2 }}
++                />
++                <div>
++                    <h3>{t("crewcloud.encoder.doneTitle", "Added to your library")}</h3>
++                    <p style={{ color: token.colorTextSecondary }}>
++                        {t(
++                            "crewcloud.encoder.doneText",
++                            '"{{name}}" is ready. Which tonie should play it?',
++                            { name: added.name },
++                        )}
++                    </p>
++                </div>
++            </Heading>
++
++            {loading ? (
++                <div style={{ textAlign: "center", padding: 24 }}>
++                    <Spin />
++                </div>
++            ) : tonies.length === 0 ? (
++                <p style={{ color: token.colorTextSecondary }}>
++                    {t(
++                        "crewcloud.encoder.noTonies",
++                        "No tonies yet. Put a tonie on your box once, then come back to give it this audio.",
++                    )}
++                </p>
++            ) : (
++                <Grid
++                    role="radiogroup"
++                    aria-label={t("crewcloud.encoder.pickTonie", "Choose a tonie")}
++                >
++                    {tonies.map((tonie) => {
++                        const title = tonieTitle(tonie, unknown);
++                        const picture = tonie.tonieInfo?.picture?.trim()
++                            ? tonie.tonieInfo.picture
++                            : "/img_unknown.png";
++                        const isSelected = selected?.ruid === tonie.ruid;
++                        return (
++                            <Tile
++                                key={tonie.ruid}
++                                type="button"
++                                role="radio"
++                                aria-checked={isSelected}
++                                onClick={() => setSelected(tonie)}
++                                $selected={isSelected}
++                                $accent={token.colorPrimary}
++                                $bg={isSelected ? token.colorPrimaryBg : token.colorFillQuaternary}
++                                $border={token.colorBorderSecondary}
++                                $color={token.colorText}
++                            >
++                                <img src={picture} alt="" loading="lazy" />
++                                <span>{title}</span>
++                                {/* tell look-alike tags apart, and show what a tonie plays now */}
++                                {!tonie.tonieInfo?.series && tonie.uid ? (
++                                    <Small $color={token.colorTextSecondary}>
++                                        {tonie.uid.slice(0, 11)}
++                                    </Small>
++                                ) : null}
++                                {tonie.source?.startsWith("lib://") ? (
++                                    <Small $color={token.colorTextSecondary}>
++                                        {t("crewcloud.encoder.nowPlays", "Now: {{name}}", {
++                                            name: fileTitle(tonie.source),
++                                        })}
++                                    </Small>
++                                ) : null}
++                            </Tile>
++                        );
++                    })}
++                </Grid>
++            )}
++
++            <Actions>
++                {tonies.length > 0 && (
++                    <Button
++                        type="primary"
++                        size="large"
++                        disabled={!selected}
++                        loading={saving}
++                        onClick={assign}
++                        data-testid="assign-button"
++                    >
++                        {selected
++                            ? t("crewcloud.encoder.giveTo", "Give it to {{tonie}}", {
++                                  tonie: tonieTitle(selected, unknown),
++                              })
++                            : t("crewcloud.encoder.pickTonie", "Choose a tonie")}
++                    </Button>
++                )}
++                <Button size="large" onClick={onAddMore}>
++                    {t("crewcloud.encoder.later", "Not now")}
++                </Button>
++            </Actions>
++        </Panel>
++    );
++};
+diff --git a/src/components/tonies/encoder/Encoder.tsx b/src/components/tonies/encoder/Encoder.tsx
+index b1ab46a..cbb58cd 100644
+--- a/src/components/tonies/encoder/Encoder.tsx
++++ b/src/components/tonies/encoder/Encoder.tsx
+@@ -1,6 +1,7 @@
+ import React from "react";
+-import { Button, Divider, Dropdown, Input, Space, Switch, Tooltip, Upload, theme } from "antd";
++import { Button, Collapse, Dropdown, Input, Space, Switch, Tooltip, Upload, theme } from "antd";
+ import { useTranslation } from "react-i18next";
++import styled from "styled-components";
+ import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
+ import { EllipsisOutlined, FolderAddOutlined, InboxOutlined } from "@ant-design/icons";
+ import { DndContext } from "@dnd-kit/core";
+@@ -12,9 +13,56 @@ import { useDirectoryCreate } from "../common/hooks/useCreateDirectory";
+ import { DirectoryTreeSelect } from "../common/elements/DirectoryTreeSelect";
+ import CreateDirectoryModal from "../common/modals/CreateDirectoryModal";
+ import { canHover } from "../../../utils/browser/browserUtils";
++import { AssignToTonie } from "./AssignToTonie";
+ 
+ const { useToken } = theme;
+ 
++const Panel = styled.div<{ $bg: string; $border: string }>`
++    display: flex;
++    flex-direction: column;
++    gap: 16px;
++    background: ${({ $bg }) => $bg};
++    border: 1px solid ${({ $border }) => $border};
++    border-radius: 18px;
++    padding: 16px;
++`;
++
++const Toolbar = styled.div`
++    display: flex;
++    flex-wrap: wrap;
++    align-items: center;
++    justify-content: space-between;
++    gap: 8px 12px;
++`;
++
++const Field = styled.label`
++    display: flex;
++    flex-direction: column;
++    gap: 6px;
++    font-weight: 700;
++`;
++
++const Row = styled.div`
++    display: flex;
++    gap: 8px;
++    align-items: center;
++`;
++
++const Option = styled.div`
++    display: flex;
++    align-items: center;
++    justify-content: space-between;
++    gap: 16px;
++
++    .hint {
++        display: block;
++        font-weight: 400;
++        font-size: 0.9em;
++        line-height: 1.35;
++        margin-top: 2px;
++    }
++`;
++
+ export const Encoder: React.FC = () => {
+     const { t } = useTranslation();
+     const { token } = useToken();
+@@ -26,10 +74,13 @@ export const Encoder: React.FC = () => {
+         tafFilename,
+         hasInvalidChars,
+         useFrontendEncoding,
+-        useFrontendEncodingSetting,
++        levelVolume,
++        lastAdded,
+ 
+         // Actions
+         setUseFrontendEncoding,
++        setLevelVolume,
++        setLastAdded,
+         sortFileListAlphabeticallyLiteral,
+         sortFileListAlphabeticallyNatural,
+         clearFileList,
+@@ -70,6 +121,8 @@ export const Encoder: React.FC = () => {
+         setRebuildList,
+     });
+ 
++    const busy = uploading || processing;
++
+     const sortMenu = [
+         {
+             key: "literal",
+@@ -85,9 +138,14 @@ export const Encoder: React.FC = () => {
+         },
+     ];
+ 
++    // After adding: offer to give the new audio to a tonie right away
++    if (lastAdded && fileList.length === 0) {
++        return <AssignToTonie added={lastAdded} onAddMore={() => setLastAdded(null)} />;
++    }
++
+     return (
+         <>
+-            <Space orientation="vertical" style={{ display: "flex" }}>
++            <Space orientation="vertical" size={16} style={{ display: "flex" }}>
+                 <DndContext sensors={[sensor]} onDragEnd={onDragEnd}>
+                     <SortableContext
+                         items={fileList.map((i) => i.uid)}
+@@ -121,160 +179,183 @@ export const Encoder: React.FC = () => {
+                 </DndContext>
+ 
+                 {fileList.length > 0 ? (
+-                    <>
+-                        <Space
+-                            orientation="horizontal"
+-                            style={{
+-                                width: "100%",
+-                                display: "flex",
+-                                alignItems: "flex-start",
+-                                flexWrap: "wrap",
+-                            }}
+-                        >
+-                            <Space.Compact>
+-                                <Button
+-                                    style={{ width: "unset" }}
+-                                    onClick={() => sortFileListAlphabeticallyLiteral()}
+-                                    disabled={uploading}
+-                                >
+-                                    {t("tonies.encoder.sortAlphabeticallyLiteral")}
+-                                </Button>{" "}
+-                                <Dropdown
+-                                    menu={{ items: sortMenu }}
+-                                    disabled={uploading}
+-                                    placement="bottomRight"
+-                                    trigger={["click"]}
+-                                >
+-                                    <Button style={{ width: "unset" }}>
+-                                        <EllipsisOutlined />
+-                                    </Button>
+-                                </Dropdown>
+-                            </Space.Compact>
++                    <Panel
++                        $bg={token.colorBgContainer}
++                        $border={token.colorBorderSecondary}
++                        className="encoder"
++                    >
++                        <Toolbar>
++                            <span style={{ color: token.colorTextSecondary }}>
++                                {t("crewcloud.encoder.files", "{{count}} files", {
++                                    count: fileList.length,
++                                })}
++                                {fileList.length > 1
++                                    ? " · " + t("crewcloud.encoder.orderHint", "drag to reorder")
++                                    : ""}
++                            </span>
++                            <Space wrap>
++                                {fileList.length > 1 && (
++                                    <Space.Compact>
++                                        <Button
++                                            onClick={() => sortFileListAlphabeticallyNatural()}
++                                            disabled={uploading}
++                                        >
++                                            {t("crewcloud.encoder.sort", "Sort A–Z")}
++                                        </Button>
++                                        <Dropdown
++                                            menu={{ items: sortMenu }}
++                                            disabled={uploading}
++                                            placement="bottomRight"
++                                            trigger={["click"]}
++                                        >
++                                            <Button
++                                                aria-label={t(
++                                                    "crewcloud.encoder.sortOptions",
++                                                    "Sort options",
++                                                )}
++                                            >
++                                                <EllipsisOutlined />
++                                            </Button>
++                                        </Dropdown>
++                                    </Space.Compact>
++                                )}
++                                <Button type="default" disabled={uploading} onClick={clearFileList}>
++                                    {t("tonies.encoder.clearList")}
++                                </Button>
++                            </Space>
++                        </Toolbar>
+ 
+-                            <Button
+-                                type="default"
+-                                disabled={uploading}
+-                                style={{ marginRight: 16 }}
+-                                onClick={clearFileList}
+-                            >
+-                                {t("tonies.encoder.clearList")}
+-                            </Button>
+-                        </Space>
+-                        <Divider />
+-                        <div style={{ width: "100%" }} className="encoder">
+-                            <Space orientation="vertical" style={{ width: "100%" }}>
+-                                <Space.Compact
+-                                    className="encoder-save-compact"
+-                                    orientation="horizontal"
+-                                    style={{
+-                                        width: "100%",
+-                                        display: "flex",
+-                                        alignItems: "flex-end",
+-                                        justifyContent: "flex-end",
+-                                    }}
++                        <Field>
++                            {t("crewcloud.encoder.name", "Name")}
++                            <Input
++                                size="large"
++                                required
++                                value={tafFilename}
++                                placeholder={t(
++                                    "crewcloud.encoder.namePlaceholder",
++                                    "e.g. Bedtime stories",
++                                )}
++                                status={tafFilename === "" || hasInvalidChars ? "error" : ""}
++                                onChange={handleFileNameInputChange}
++                                disabled={busy}
++                                data-testid="encoder-name"
++                            />
++                            {hasInvalidChars ? (
++                                <span style={{ color: token.colorErrorText, fontWeight: 400 }}>
++                                    {t("inputValidator.invalidCharactersDetected", {
++                                        invalidChar: invalidCharactersAsString,
++                                    })}
++                                </span>
++                            ) : null}
++                        </Field>
++
++                        <Field as="div">
++                            {t("crewcloud.encoder.folder", "Save in")}
++                            <Row>
++                                <DirectoryTreeSelect
++                                    directoryTree={directoryTree}
++                                    disabled={busy}
++                                    placeholder={t("fileBrowser.moveFile.destinationPlaceholder")}
++                                    style={{ flex: 1 }}
++                                />
++                                <Tooltip
++                                    open={!canHover ? false : undefined}
++                                    title={t("fileBrowser.createDirectory.createDirectory")}
+                                 >
+-                                    <Input
+-                                        type="text"
+-                                        className="encoder-save-label"
+-                                        style={{
+-                                            maxWidth: 180,
+-                                            borderTopRightRadius: 0,
+-                                            borderBottomRightRadius: 0,
++                                    <Button
++                                        disabled={busy}
++                                        icon={<FolderAddOutlined />}
++                                        aria-label={t(
++                                            "fileBrowser.createDirectory.createDirectory",
++                                        )}
++                                        onClick={() => {
++                                            const basePath = directoryTree.getPathFromNodeId(
++                                                directoryTree.treeNodeId,
++                                            );
++                                            openCreateDirectoryModal(basePath);
+                                         }}
+-                                        disabled
+-                                        value={t("tonies.encoder.saveAs")}
+                                     />
++                                </Tooltip>
++                            </Row>
++                        </Field>
+ 
+-                                    <DirectoryTreeSelect
+-                                        className="encoder-save-dir"
+-                                        directoryTree={directoryTree}
+-                                        disabled={processing || uploading}
+-                                        placeholder={t(
+-                                            "fileBrowser.moveFile.destinationPlaceholder",
+-                                        )}
+-                                    />
++                        <Option>
++                            <span style={{ fontWeight: 700 }}>
++                                {t("crewcloud.setup.normalize", "Even out the volume")}
++                                <span className="hint" style={{ color: token.colorTextSecondary }}>
++                                    {t(
++                                        "crewcloud.setup.normalizeHint",
++                                        "Quiet and loud recordings end up at a similar volume on the box.",
++                                    )}
++                                </span>
++                            </span>
++                            <Switch
++                                checked={levelVolume}
++                                onChange={setLevelVolume}
++                                disabled={busy}
++                                aria-label={t("crewcloud.setup.normalize", "Even out the volume")}
++                            />
++                        </Option>
+ 
+-                                    <Tooltip
+-                                        open={!canHover ? false : undefined}
+-                                        title={t("fileBrowser.createDirectory.createDirectory")}
+-                                    >
+-                                        <Button
+-                                            className="encoder-save-btn"
+-                                            disabled={uploading || processing}
+-                                            icon={<FolderAddOutlined />}
+-                                            onClick={() => {
+-                                                const basePath = directoryTree.getPathFromNodeId(
+-                                                    directoryTree.treeNodeId,
+-                                                );
+-                                                openCreateDirectoryModal(basePath);
+-                                            }}
+-                                            style={{ borderRadius: 0 }}
+-                                        />
+-                                    </Tooltip>
++                        <Collapse
++                            ghost
++                            size="small"
++                            style={{ margin: "-8px 0" }}
++                            styles={{ header: { padding: "4px 0" }, body: { padding: "10px 0 0" } }}
++                            items={[
++                                {
++                                    key: "more",
++                                    label: t("crewcloud.encoder.moreOptions", "More options"),
++                                    children: (
++                                        <Option>
++                                            <span style={{ fontWeight: 700 }}>
++                                                {t(
++                                                    "crewcloud.encoder.browserConvert",
++                                                    "Convert in this browser",
++                                                )}
++                                                <span
++                                                    className="hint"
++                                                    style={{ color: token.colorTextSecondary }}
++                                                >
++                                                    {t(
++                                                        "crewcloud.encoder.browserConvertHint",
++                                                        "Much smaller uploads. Turn off to send the raw audio to the server instead.",
++                                                    )}
++                                                </span>
++                                            </span>
++                                            <Switch
++                                                checked={useFrontendEncoding}
++                                                onChange={setUseFrontendEncoding}
++                                                disabled={busy}
++                                                aria-label={t(
++                                                    "crewcloud.encoder.browserConvert",
++                                                    "Convert in this browser",
++                                                )}
++                                            />
++                                        </Option>
++                                    ),
++                                },
++                            ]}
++                        />
+ 
+-                                    <Input
+-                                        className="encoder-save-name"
+-                                        suffix=".taf"
+-                                        required
+-                                        value={tafFilename}
+-                                        style={{ maxWidth: 300 }}
+-                                        status={
+-                                            (fileList.length > 0 && tafFilename === "") ||
+-                                            hasInvalidChars
+-                                                ? "error"
+-                                                : ""
+-                                        }
+-                                        onChange={handleFileNameInputChange}
+-                                        disabled={uploading || processing}
+-                                    />
+-                                </Space.Compact>
+-                                {hasInvalidChars ? (
+-                                    <div style={{ textAlign: "end", color: token.colorErrorText }}>
+-                                        {t("inputValidator.invalidCharactersDetected", {
+-                                            invalidChar: invalidCharactersAsString,
+-                                        })}
+-                                    </div>
+-                                ) : null}
+-                                <div
+-                                    style={{
+-                                        display: "flex",
+-                                        flexDirection: "row",
+-                                        justifyContent: "flex-end",
+-                                        alignItems: "center",
+-                                        marginTop: 8,
+-                                        gap: 16,
+-                                    }}
+-                                >
+-                                    <Switch
+-                                        checkedChildren={t("tonies.encoder.browserSideEncoding")}
+-                                        unCheckedChildren={t("tonies.encoder.serverSideEncoding")}
+-                                        defaultChecked={useFrontendEncodingSetting}
+-                                        checked={useFrontendEncoding}
+-                                        onChange={setUseFrontendEncoding}
+-                                        disabled={uploading || processing}
+-                                    />
+-                                    <Button
+-                                        type="primary"
+-                                        onClick={
+-                                            useFrontendEncoding ? handleWasmUpload : handleUpload
+-                                        }
+-                                        disabled={
+-                                            fileList.length === 0 ||
+-                                            tafFilename === "" ||
+-                                            hasInvalidChars
+-                                        }
+-                                        loading={uploading || processing}
+-                                    >
+-                                        {uploading
+-                                            ? processing
+-                                                ? t("tonies.encoder.processing")
+-                                                : t("tonies.encoder.uploading")
+-                                            : t("tonies.encoder.encode")}
+-                                    </Button>
+-                                </div>
+-                            </Space>
+-                        </div>
+-                    </>
++                        <Button
++                            type="primary"
++                            size="large"
++                            block
++                            onClick={useFrontendEncoding ? handleWasmUpload : handleUpload}
++                            disabled={
++                                fileList.length === 0 || tafFilename === "" || hasInvalidChars
++                            }
++                            loading={busy}
++                            data-testid="encoder-add"
++                        >
++                            {uploading
++                                ? processing
++                                    ? t("crewcloud.encoder.converting", "Converting…")
++                                    : t("crewcloud.encoder.uploading", "Uploading…")
++                                : t("crewcloud.encoder.add", "Add to library")}
++                        </Button>
++                    </Panel>
+                 ) : null}
+             </Space>
+ 
+diff --git a/src/components/tonies/encoder/hooks/useEncoder.ts b/src/components/tonies/encoder/hooks/useEncoder.ts
+index 4f5d7c3..8371f75 100644
+--- a/src/components/tonies/encoder/hooks/useEncoder.ts
++++ b/src/components/tonies/encoder/hooks/useEncoder.ts
+@@ -25,6 +25,19 @@ import { useDirectoryTree } from "../../common/hooks/useDirectoryTree";
+ 
+ const api = new TeddyCloudApi(defaultAPIConfig());
+ 
++/** What was just added to the library, so the page can offer the next step. */
++export interface AddedAudio {
++    name: string;
++    /** lib:// path to give to a tonie */
++    source: string;
++}
++
++/** lib:// source for a file saved under `path` ("" or "/Folder/Sub") in the library. */
++export const librarySource = (path: string, name: string) => {
++    const dir = path.replace(/^\/+|\/+$/g, "");
++    return `lib://${dir ? dir + "/" : ""}${name}`;
++};
++
+ export const useEncoder = () => {
+     const { t } = useTranslation();
+     const { addNotification, addLoadingNotification, closeLoadingNotification } = useTeddyCloud();
+@@ -34,6 +47,9 @@ export const useEncoder = () => {
+     const [useFrontendEncodingSetting, setUseFrontendEncodingSetting] = useState(false);
+     const [wasmLoaded, setWasmLoaded] = useState(false);
+     const [bitrate, setBitrate] = useState(96);
++    // Even out the volume (encode.normalize); on unless the server says otherwise
++    const [levelVolume, setLevelVolume] = useState(true);
++    const [lastAdded, setLastAdded] = useState<AddedAudio | null>(null);
+ 
+     const [fileList, setFileList] = useState<MyUploadFile[]>([]);
+     const [uploading, setUploading] = useState(false);
+@@ -102,9 +118,21 @@ export const useEncoder = () => {
+             }
+         };
+ 
++        const fetchNormalizeSetting = async () => {
++            try {
++                const response = await api.apiGetTeddyCloudSettingRaw("encode.normalize");
++                if (!response.ok) return; // older servers don't have it: keep levelling on
++                const data = await response.json();
++                setLevelVolume(data.toString() === "true");
++            } catch {
++                // keep the default
++            }
++        };
++
+         fetchDebugPCM();
+         fetchUseFrontendSetting();
+         fetchBitrateSetting();
++        fetchNormalizeSetting();
+         // eslint-disable-next-line react-hooks/exhaustive-deps
+     }, []);
+ 
+@@ -241,6 +269,7 @@ export const useEncoder = () => {
+     // -------------------------------------------------
+ 
+     const handleUpload = async () => {
++        setLastAdded(null);
+         setUploading(true);
+         const formData = new FormData();
+         const key = "encoding-" + tafFilename + ".taf";
+@@ -262,6 +291,7 @@ export const useEncoder = () => {
+                         fileList,
+                         file,
+                         debugPCMObjects,
++                        levelVolume,
+                     ),
+                 );
+             } catch (error) {
+@@ -303,9 +333,13 @@ export const useEncoder = () => {
+                 addNotification(
+                     NotificationTypeEnum.Success,
+                     t("tonies.encoder.uploadSuccessful"),
+-                    t("tonies.encoder.uploadSuccessfulDetails", { file: tafFilename + ".taf" }),
++                    t("tonies.encoder.uploadSuccessfulDetails", { file: tafFilename }),
+                     t("tonies.title"),
+                 );
++                setLastAdded({
++                    name: tafFilename,
++                    source: librarySource(queryParams.path, tafFilename + ".taf"),
++                });
+                 setFileList([]);
+                 setTafFilename("");
+             } else {
+@@ -335,6 +369,7 @@ export const useEncoder = () => {
+     // -------------------------------------------------
+ 
+     const handleWasmUpload = async () => {
++        setLastAdded(null);
+         setUploading(true);
+         setProcessing(true);
+         const key = "encoding-" + tafFilename + ".taf";
+@@ -370,6 +405,7 @@ export const useEncoder = () => {
+                         `${t("tonies.encoder.encoding")} ${current + 1}/${total}: ${currentFile}`,
+                     );
+                 },
++                levelVolume,
+             );
+ 
+             setProcessing(false);
+@@ -399,9 +435,13 @@ export const useEncoder = () => {
+                 addNotification(
+                     NotificationTypeEnum.Success,
+                     t("tonies.encoder.uploadSuccessful"),
+-                    t("tonies.encoder.uploadSuccessfulDetails", { file: tafFilename + ".taf" }),
++                    t("tonies.encoder.uploadSuccessfulDetails", { file: tafFilename }),
+                     t("tonies.title"),
+                 );
++                setLastAdded({
++                    name: tafFilename,
++                    source: librarySource(queryParams.path, tafFilename + ".taf"),
++                });
+                 setFileList([]);
+                 setTafFilename("");
+             } else {
+@@ -436,12 +476,16 @@ export const useEncoder = () => {
+         hasInvalidChars,
+         useFrontendEncoding,
+         useFrontendEncodingSetting,
++        levelVolume,
++        lastAdded,
+         isCreateDirectoryModalOpen,
+         createDirectoryPath,
+         inputRef,
+ 
+         // Actions
+         setUseFrontendEncoding,
++        setLevelVolume,
++        setLastAdded,
+         sortFileListAlphabeticallyLiteral,
+         sortFileListAlphabeticallyNatural,
+         clearFileList,
+diff --git a/src/utils/audio/audioEncoder.ts b/src/utils/audio/audioEncoder.ts
+index 6194601..2ef382d 100644
+--- a/src/utils/audio/audioEncoder.ts
++++ b/src/utils/audio/audioEncoder.ts
+@@ -1,4 +1,5 @@
+ import { UploadFile } from "antd";
++import { levelLoudness } from "./loudness";
+ 
+ export interface MyUploadFile<T = any> extends UploadFile<T> {
+     file?: File;
+@@ -47,12 +48,14 @@ function createOfflineAudioContext(
+ }
+ 
+ /**
+- * Converts any audio ArrayBuffer to 48 kHz stereo 16-bit PCM (interleaved).
++ * Converts any audio ArrayBuffer to 48 kHz stereo 16-bit PCM (interleaved),
++ * optionally levelling its loudness first.
+  */
+ async function encodeToStereoPcm16(
+     arrayBuffer: ArrayBuffer,
+     debugPCMObjects: boolean | undefined,
+     debugFileIndex: number,
++    level: boolean,
+ ): Promise<Int16Array> {
+     const audioContext = createAudioContext();
+ 
+@@ -85,11 +88,13 @@ async function encodeToStereoPcm16(
+         // Left channel always exists
+         const leftChannelData = upsampledAudioBuffer.getChannelData(0);
+ 
+-        // If mono, duplicate channel 0 → stereo
++        // If mono, duplicate channel 0 → stereo (the same array, so levelling treats it as one)
+         const rightChannelData =
+-            numberOfChannels > 1
+-                ? upsampledAudioBuffer.getChannelData(1)
+-                : upsampledAudioBuffer.getChannelData(0);
++            numberOfChannels > 1 ? upsampledAudioBuffer.getChannelData(1) : leftChannelData;
++
++        if (level) {
++            levelLoudness([leftChannelData, rightChannelData], TARGET_SAMPLE_RATE);
++        }
+ 
+         const frameCount = leftChannelData.length;
+         const interleavedData = new Int16Array(frameCount * 2);
+@@ -151,6 +156,7 @@ export function upload(
+     fileList: MyUploadFile<any>[],
+     file: MyUploadFile<any>,
+     debugPCMObjects?: boolean,
++    level: boolean = false,
+ ) {
+     if (!file.file) {
+         resolve(undefined);
+@@ -163,7 +169,12 @@ export function upload(
+                 const arrayBuffer = await file.file.arrayBuffer();
+                 const fileIndex = fileList.indexOf(file);
+ 
+-                const pcmData = await encodeToStereoPcm16(arrayBuffer, debugPCMObjects, fileIndex);
++                const pcmData = await encodeToStereoPcm16(
++                    arrayBuffer,
++                    debugPCMObjects,
++                    fileIndex,
++                    level,
++                );
+ 
+                 const filename = `pcmData.${fileIndex}.pcm`;
+ 
+diff --git a/src/utils/audio/loudness.ts b/src/utils/audio/loudness.ts
+new file mode 100644
+index 0000000..e743af3
+--- /dev/null
++++ b/src/utils/audio/loudness.ts
+@@ -0,0 +1,283 @@
++/**
++ * Loudness levelling for audio converted in the browser.
++ *
++ * Measures integrated loudness (ITU-R BS.1770 / EBU R128: K-weighting, 400 ms blocks with 75 %
++ * overlap, absolute gate at -70 LUFS and relative gate at -10 LU), then applies one gain so every
++ * track lands at the same loudness. Where that gain would push peaks past the ceiling, a
++ * look-ahead peak limiter pulls just those moments down, so quiet recordings with a few loud
++ * spikes still get levelled instead of clipping.
++ *
++ * Same target as the server's ffmpeg loudnorm (-16 LUFS), so tracks sound alike whichever way they
++ * were converted. Works in place on the decoded channel data, with no full-length scratch buffers.
++ */
++
++export const LOUDNESS_TARGET_LUFS = -16;
++/** Sample-peak ceiling after levelling, in dBFS (leaves room for the Opus encoder's overshoot). */
++export const PEAK_CEILING_DBFS = -1.5;
++/** Never boost more than this, so near-silent recordings don't turn into loud hiss. */
++export const MAX_GAIN_DB = 18;
++
++const ABSOLUTE_GATE_LUFS = -70;
++const RELATIVE_GATE_LU = -10;
++const LOOKAHEAD_MS = 5;
++const RELEASE_MS = 120;
++
++interface Biquad {
++    b0: number;
++    b1: number;
++    b2: number;
++    a1: number;
++    a2: number;
++}
++
++/** BS.1770 K-weighting (high-shelf pre-filter + RLB high-pass) for any sample rate. */
++export const kWeightingFilters = (sampleRate: number): [Biquad, Biquad] => {
++    let f0 = 1681.974450955533;
++    const G = 3.999843853973347;
++    let Q = 0.7071752369554196;
++    let K = Math.tan((Math.PI * f0) / sampleRate);
++    const Vh = Math.pow(10, G / 20);
++    const Vb = Math.pow(Vh, 0.4996667741545416);
++    let a0 = 1 + K / Q + K * K;
++    const shelf: Biquad = {
++        b0: (Vh + (Vb * K) / Q + K * K) / a0,
++        b1: (2 * (K * K - Vh)) / a0,
++        b2: (Vh - (Vb * K) / Q + K * K) / a0,
++        a1: (2 * (K * K - 1)) / a0,
++        a2: (1 - K / Q + K * K) / a0,
++    };
++
++    f0 = 38.13547087602444;
++    Q = 0.5003270373238773;
++    K = Math.tan((Math.PI * f0) / sampleRate);
++    a0 = 1 + K / Q + K * K;
++    const highpass: Biquad = {
++        b0: 1,
++        b1: -2,
++        b2: 1,
++        a1: (2 * (K * K - 1)) / a0,
++        a2: (1 - K / Q + K * K) / a0,
++    };
++    return [shelf, highpass];
++};
++
++/**
++ * Integrated loudness in LUFS of the signal made of `channels` (each weighted 1.0, as for L/R).
++ * Pass the same array twice for mono that will be played as stereo. Returns -Infinity for silence.
++ */
++export const measureLoudness = (channels: Float32Array[], sampleRate: number): number => {
++    const frames = channels[0]?.length ?? 0;
++    if (frames === 0) return -Infinity;
++    const step = Math.round(sampleRate * 0.1); // 100 ms; a block is 4 steps (400 ms)
++    const steps = Math.floor(frames / step);
++    // Clips shorter than one block are measured as a whole (plain mean square), so they're levelled too
++    const bucket = steps >= 4 ? step : frames;
++
++    // Sum of K-weighted squares per 100 ms step, over all channels (a trailing partial step is dropped)
++    const stepEnergy = new Float64Array(Math.max(steps, 1));
++    const [s, h] = kWeightingFilters(sampleRate);
++    for (const data of channels) {
++        let x1 = 0,
++            x2 = 0,
++            y1 = 0,
++            y2 = 0; // shelf state
++        let u1 = 0,
++            u2 = 0,
++            z1 = 0,
++            z2 = 0; // high-pass state
++        let k = 0;
++        let filled = 0;
++        let acc = 0;
++        for (let i = 0; i < frames; i++) {
++            const x = data[i];
++            const y = s.b0 * x + s.b1 * x1 + s.b2 * x2 - s.a1 * y1 - s.a2 * y2;
++            x2 = x1;
++            x1 = x;
++            y2 = y1;
++            y1 = y;
++            const z = h.b0 * y + h.b1 * u1 + h.b2 * u2 - h.a1 * z1 - h.a2 * z2;
++            u2 = u1;
++            u1 = y;
++            z2 = z1;
++            z1 = z;
++            acc += z * z;
++            if (++filled === bucket) {
++                if (k < stepEnergy.length) stepEnergy[k] += acc;
++                k++;
++                filled = 0;
++                acc = 0;
++            }
++        }
++    }
++
++    const toLufs = (meanSquare: number) => -0.691 + 10 * Math.log10(meanSquare);
++
++    if (steps < 4) {
++        const ms = stepEnergy[0] / frames;
++        return ms > 0 ? toLufs(ms) : -Infinity;
++    }
++
++    // 400 ms blocks, hopping 100 ms
++    const blocks = new Float64Array(steps - 3);
++    for (let b = 0; b < blocks.length; b++) {
++        blocks[b] =
++            (stepEnergy[b] + stepEnergy[b + 1] + stepEnergy[b + 2] + stepEnergy[b + 3]) /
++            (4 * step);
++    }
++
++    const absGate = Math.pow(10, (ABSOLUTE_GATE_LUFS + 0.691) / 10);
++    let sum = 0;
++    let count = 0;
++    for (const z of blocks) {
++        if (z > absGate) {
++            sum += z;
++            count++;
++        }
++    }
++    if (count === 0) return -Infinity;
++
++    const relGate = (sum / count) * Math.pow(10, RELATIVE_GATE_LU / 10);
++    const gate = Math.max(absGate, relGate);
++    sum = 0;
++    count = 0;
++    for (const z of blocks) {
++        if (z > gate) {
++            sum += z;
++            count++;
++        }
++    }
++    return count ? toLufs(sum / count) : -Infinity;
++};
++
++/**
++ * Multiplies `channels` in place by `gain`, limiting peaks to `ceiling` (linear) with a smooth
++ * look-ahead gain envelope shared by all channels (so the stereo image doesn't shift).
++ *
++ * Envelope: the needed gain per frame is peak-held over the look-ahead window, given a slow
++ * release, then averaged over the same window. Every frame of the average only sees values at or
++ * below the needed gain of the frame it protects, so no sample ends up above the ceiling.
++ */
++export const applyGainWithLimiter = (
++    channels: Float32Array[],
++    sampleRate: number,
++    gain: number,
++    ceiling: number,
++) => {
++    const unique = Array.from(new Set(channels));
++    const frames = unique[0]?.length ?? 0;
++    const la = Math.max(1, Math.round((sampleRate * LOOKAHEAD_MS) / 1000));
++    const release = 1 - Math.exp(-1 / ((sampleRate * RELEASE_MS) / 1000));
++
++    const needed = (i: number) => {
++        let peak = 0;
++        for (const c of unique) {
++            const v = Math.abs(c[i]);
++            if (v > peak) peak = v;
++        }
++        const p = peak * gain;
++        return p > ceiling ? ceiling / p : 1;
++    };
++
++    // Sliding minimum of needed() over [i, i + la - 1] (monotonic deque, indexes into a ring)
++    const dqIdx = new Int32Array(la + 1);
++    const dqVal = new Float64Array(la + 1);
++    let head = 0;
++    let size = 0;
++    const cap = la + 1;
++    const push = (idx: number, val: number) => {
++        while (size > 0 && dqVal[(head + size - 1) % cap] >= val) size--;
++        const pos = (head + size) % cap;
++        dqIdx[pos] = idx;
++        dqVal[pos] = val;
++        size++;
++    };
++    let next = 0; // next frame index to push into the window
++    const fill = (upTo: number) => {
++        for (; next <= upTo && next < frames; next++) push(next, needed(next));
++    };
++
++    // Moving average of the held/released envelope over the last `la` frames. It starts out holding
++    // the first window's minimum, so a peak right at the start is covered like any other.
++    fill(la - 1);
++    const first = size > 0 ? dqVal[head] : 1;
++    const ring = new Float64Array(la).fill(first);
++    let ringSum = first * la;
++    let ringPos = 0;
++    let released = first;
++
++    for (let i = 0; i < frames; i++) {
++        fill(i + la - 1);
++        while (size > 0 && dqIdx[head] < i) {
++            head = (head + 1) % cap;
++            size--;
++        }
++        const held = size > 0 ? dqVal[head] : 1;
++
++        released = Math.min(held, released + (1 - released) * release);
++
++        ringSum += released - ring[ringPos];
++        ring[ringPos] = released;
++        ringPos = (ringPos + 1) % la;
++        const env = ringSum / la;
++
++        const g = gain * env;
++        for (const c of unique) c[i] *= g;
++    }
++};
++
++/** Linear sample peak across channels. */
++const samplePeak = (channels: Float32Array[]) => {
++    let peak = 0;
++    for (const c of new Set(channels)) {
++        for (let i = 0; i < c.length; i++) {
++            const v = Math.abs(c[i]);
++            if (v > peak) peak = v;
++        }
++    }
++    return peak;
++};
++
++export interface LevelResult {
++    /** Loudness before levelling, LUFS (-Infinity for silence). */
++    measured: number;
++    /** Gain applied, dB (0 when nothing was done). */
++    gainDb: number;
++    /** Whether the peak limiter had to step in. */
++    limited: boolean;
++}
++
++/**
++ * Levels decoded audio in place to LOUDNESS_TARGET_LUFS.
++ * `channels` are the channels that will be encoded (the same array twice for mono → stereo).
++ */
++export const levelLoudness = (channels: Float32Array[], sampleRate: number): LevelResult => {
++    const measured = measureLoudness(channels, sampleRate);
++    if (!isFinite(measured)) return { measured, gainDb: 0, limited: false };
++
++    const ceiling = Math.pow(10, PEAK_CEILING_DBFS / 20);
++    let current = measured;
++    let gainDb = 0;
++    let limited = false;
++
++    // Limiting takes some loudness back off, so re-measure and top up (a few passes at most).
++    for (let pass = 0; pass < 3; pass++) {
++        const step = Math.min(LOUDNESS_TARGET_LUFS - current, MAX_GAIN_DB - gainDb);
++        if (Math.abs(step) < 0.1) break;
++
++        const gain = Math.pow(10, step / 20);
++        gainDb += step;
++        if (samplePeak(channels) * gain > ceiling) {
++            applyGainWithLimiter(channels, sampleRate, gain, ceiling);
++            limited = true;
++        } else {
++            for (const c of new Set(channels)) {
++                for (let i = 0; i < c.length; i++) c[i] *= gain;
++            }
++            break; // a plain gain lands exactly on target
++        }
++
++        current = measureLoudness(channels, sampleRate);
++        if (LOUDNESS_TARGET_LUFS - current < 0.5) break;
++    }
++    return { measured, gainDb, limited };
++};
+diff --git a/src/utils/audio/wasmEncoder.ts b/src/utils/audio/wasmEncoder.ts
+index 1271edb..20fb0c3 100644
+--- a/src/utils/audio/wasmEncoder.ts
++++ b/src/utils/audio/wasmEncoder.ts
+@@ -7,6 +7,7 @@
+  */
+ 
+ import type { MyUploadFile } from "./audioEncoder";
++import { levelLoudness } from "./loudness";
+ 
+ // Emscripten module base type
+ interface EmscriptenModule {
+@@ -217,9 +218,9 @@ export class WasmTafEncoder {
+     }
+ 
+     /**
+-     * Convert audio file to PCM data
++     * Convert audio file to PCM data, optionally levelling its loudness first
+      */
+-    private static async audioFileToPcm(file: File): Promise<Int16Array> {
++    private static async audioFileToPcm(file: File, level: boolean): Promise<Int16Array> {
+         const arrayBuffer = await file.arrayBuffer();
+         const audioContext = new AudioContext();
+ 
+@@ -252,6 +253,10 @@ export class WasmTafEncoder {
+         const rightChannel =
+             resampledBuffer.numberOfChannels > 1 ? resampledBuffer.getChannelData(1) : leftChannel; // Duplicate mono to stereo
+ 
++        if (level) {
++            levelLoudness([leftChannel, rightChannel], resampledBuffer.sampleRate);
++        }
++
+         const pcmData = new Int16Array(leftChannel.length * 2);
+         for (let i = 0; i < leftChannel.length; i++) {
+             // Clamp to int16 range
+@@ -271,6 +276,7 @@ export class WasmTafEncoder {
+      * @param files Array of audio files to encode
+      * @param audioId Audio ID for the TAF file
+      * @param onProgress Optional progress callback (current, total, currentFile)
++     * @param level Level each file's loudness before encoding
+      * @returns TAF file as Blob
+      */
+     static async encodeMultipleFiles(
+@@ -278,6 +284,7 @@ export class WasmTafEncoder {
+         audioId: number,
+         bitrate: number,
+         onProgress?: (current: number, total: number, currentFile: string) => void,
++        level: boolean = false,
+     ): Promise<Blob> {
+         // Ensure WASM is loaded
+         await loadWasmEncoder();
+@@ -305,7 +312,7 @@ export class WasmTafEncoder {
+                 }
+ 
+                 // Convert audio file to PCM
+-                const pcmData = await WasmTafEncoder.audioFileToPcm(file.file);
++                const pcmData = await WasmTafEncoder.audioFileToPcm(file.file, level);
+ 
+                 // Add to encoder
+                 encoder.addSamples(pcmData);
+@@ -340,15 +347,21 @@ export class WasmTafEncoder {
+      *
+      * @param file Audio file to encode
+      * @param audioId Audio ID for the TAF file
++     * @param level Level the loudness before encoding
+      * @returns TAF file as Blob
+      */
+-    static async encodeSingleFile(file: File, audioId: number, bitrate: number): Promise<Blob> {
++    static async encodeSingleFile(
++        file: File,
++        audioId: number,
++        bitrate: number,
++        level: boolean = false,
++    ): Promise<Blob> {
+         const myFile: MyUploadFile = {
+             uid: "1",
+             name: file.name,
+             file: file,
+         };
+ 
+-        return WasmTafEncoder.encodeMultipleFiles([myFile], audioId, bitrate);
++        return WasmTafEncoder.encodeMultipleFiles([myFile], audioId, bitrate, undefined, level);
+     }
+ }
+diff --git a/vite.config.ts b/vite.config.ts
+index ebc2be0..ab32942 100644
+--- a/vite.config.ts
++++ b/vite.config.ts
+@@ -36,6 +36,12 @@ export default defineConfig(({ command, mode }) => {
+                     changeOrigin: true,
+                     secure: false,
+                 },
++                // Tonie content settings (source, live, nocloud) are saved via /content/json/set/*
++                "/content": {
++                    target: proxyUrl,
++                    changeOrigin: true,
++                    secure: false,
++                },
+                 "/img_unknown.png": {
+                     target: proxyUrl,
+                     changeOrigin: true,
+-- 
+2.43.0
+

@@ -1,0 +1,97 @@
+/* Colada Builds theme for the TeddyCloud (Ant Design v6) admin UI.
+   Loaded over the stock UI by Caddy — see ../README.md. Retints antd's design
+   tokens to the Colada Builds palette, sets the app fonts, and paints the header
+   and primary controls with the pink→purple gradient used on the login screen. */
+
+@import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&family=Nunito:wght@400;600;700;800&display=swap');
+
+:root{
+  /* antd v6 exposes its tokens as CSS variables; overriding the primary set
+     recolors buttons, links, switches, tabs, selections, focus rings, etc. */
+  --ant-color-primary:#8b6df2;
+  --ant-color-primary-hover:#9b81f5;
+  --ant-color-primary-active:#6f54d6;
+  --ant-color-primary-bg:#f1ecfe;
+  --ant-color-primary-bg-hover:#e7ddfd;
+  --ant-color-primary-border:#cbbafb;
+  --ant-color-primary-border-hover:#b6a1f8;
+  --ant-color-primary-text:#6f54d6;
+  --ant-color-primary-text-hover:#8b6df2;
+  --ant-color-primary-text-active:#5b43bd;
+  --ant-color-link:#8b6df2;
+  --ant-color-link-hover:#9b81f5;
+  --ant-color-link-active:#6f54d6;
+  --ant-color-info:#8b6df2;
+  --ant-color-info-hover:#9b81f5;
+  --ant-border-radius:12px;
+  --ant-border-radius-lg:16px;
+  --ant-border-radius-sm:8px;
+  /* Colada Builds brand tokens used by the rules below */
+  --cb-pink:#ff8fab; --cb-purple:#8b6df2; --cb-deep:#6f54d6;
+  --cb-grad:linear-gradient(135deg,#ff8fab 0%,#8b6df2 100%);
+}
+
+/* --- Fonts ------------------------------------------------------------- */
+body, .ant-app, input, button, textarea, select, [class^="ant-"], [class*=" ant-"]{
+  font-family:"Nunito", ui-rounded, -apple-system, "Segoe UI", system-ui, sans-serif;
+}
+h1,h2,h3,h4,h5,
+.ant-typography, .ant-menu, .ant-page-header-heading-title,
+.ant-modal-title, .ant-card-head-title, .ant-tabs-tab{
+  font-family:"Fredoka", "Nunito", sans-serif;
+}
+h1,h2,h3,.ant-page-header-heading-title{ letter-spacing:.2px; }
+
+/* --- Primary buttons: the brand gradient ------------------------------ */
+.ant-btn-primary:not(:disabled):not(.ant-btn-dangerous){
+  background:var(--cb-grad)!important; border-color:transparent!important;
+  box-shadow:0 6px 16px rgba(139,109,242,.28)!important;
+}
+.ant-btn-primary:not(:disabled):not(.ant-btn-dangerous):hover{ filter:brightness(1.06); }
+.ant-btn-primary:not(:disabled):not(.ant-btn-dangerous):active{ filter:brightness(.96); }
+
+/* --- Links ------------------------------------------------------------ */
+a{ color:var(--cb-purple); }
+a:hover{ color:#9b81f5; }
+
+/* --- Top header bar: gradient ---------------------------------------- */
+.ant-layout-header{
+  background:var(--cb-grad)!important;
+  box-shadow:0 2px 14px rgba(139,109,242,.25);
+}
+.ant-layout-header,
+.ant-layout-header a,
+.ant-layout-header .ant-typography,
+.ant-layout-header .ant-menu,
+.ant-layout-header .ant-menu-item,
+.ant-layout-header .ant-menu-submenu-title,
+.ant-layout-header .anticon{ color:#fff!important; }
+.ant-layout-header .ant-menu{ background:transparent!important; border-bottom:0!important; }
+.ant-layout-header .ant-menu-item-selected,
+.ant-layout-header .ant-menu-item:hover{ background:rgba(255,255,255,.16)!important; border-radius:10px; }
+
+/* --- Side menu selection --------------------------------------------- */
+.ant-menu-light .ant-menu-item-selected{ background:var(--ant-color-primary-bg)!important; color:var(--cb-deep)!important; }
+.ant-menu-item-selected::after{ border-inline-end-color:var(--cb-purple)!important; }
+.ant-tabs-ink-bar{ background:var(--cb-purple)!important; }
+.ant-tabs-tab.ant-tabs-tab-active .ant-tabs-tab-btn{ color:var(--cb-deep)!important; }
+
+/* --- Switches / toggles ---------------------------------------------- */
+.ant-switch.ant-switch-checked{ background:var(--cb-grad)!important; }
+
+/* --- Softer, rounded surfaces ---------------------------------------- */
+.ant-card, .ant-modal-content, .ant-collapse, .ant-table-wrapper .ant-table{
+  border-radius:16px!important;
+}
+.ant-card{ box-shadow:0 4px 18px rgba(58,47,91,.06); }
+
+/* --- Focus ring ------------------------------------------------------- */
+:where(.ant-input,.ant-input-affix-wrapper,.ant-select-selector,.ant-picker):focus,
+:where(.ant-input,.ant-input-affix-wrapper,.ant-select-selector,.ant-picker):focus-within{
+  border-color:var(--cb-purple)!important; box-shadow:0 0 0 3px rgba(139,109,242,.15)!important;
+}
+
+/* --- Brand mark injected by brand.js --------------------------------- */
+.cb-brand{ display:inline-flex; align-items:center; gap:10px; font-family:"Fredoka",sans-serif;
+  font-weight:700; font-size:1.15rem; color:#fff; }
+.cb-brand img{ width:30px; height:30px; }

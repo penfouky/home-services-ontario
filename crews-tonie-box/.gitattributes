@@ -1,0 +1,2 @@
+# the patch contains CRLF lines from the upstream sources, keep them byte for byte
+*.patch -text

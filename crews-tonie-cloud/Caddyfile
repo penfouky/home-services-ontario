@@ -1,0 +1,49 @@
+{
+	email {$ACME_EMAIL}
+}
+
+# Plain HTTP: Caddy answers the Let's Encrypt challenge here automatically, and sends
+# any human who types the bare domain up to the password-protected admin UI.
+http://{$TC_DOMAIN} {
+	redir https://{$TC_DOMAIN}:8443{uri} permanent
+}
+
+# The branded, password-protected TeddyCloud admin UI.
+{$TC_DOMAIN}:8443 {
+	encode zstd gzip
+
+	# The login page and the auth check are always reachable (they must be, to log in).
+	handle /__gate/* {
+		reverse_proxy gate:8080
+	}
+
+	# The Colada Builds theme assets (cosmetic only, no secrets), served from the
+	# ./theme/web volume. Reachable without login so the styled-and-scripted page can
+	# fetch them; they carry nothing sensitive.
+	handle /colada/* {
+		root * /srv
+		file_server
+	}
+
+	# Everything else requires a valid session cookie. The gate returns 200 to let it
+	# through, or a redirect to the login page when the visitor isn't signed in.
+	handle {
+		route {
+			forward_auth gate:8080 {
+				uri /__gate/verify
+			}
+			# Inject the theme into TeddyCloud's HTML. The literal </head> only appears
+			# in HTML documents, so JS/JSON/CSS responses pass through untouched. The
+			# upstream must send uncompressed HTML for the rewrite to see it (site-level
+			# `encode` still compresses the result for the browser).
+			replace_response "</head>" `<link rel="stylesheet" href="/colada/theme.css"><script defer src="/colada/brand.js"></script></head>`
+			reverse_proxy teddycloud:80 {
+				header_up -Accept-Encoding
+			}
+		}
+	}
+
+	log {
+		output stdout
+	}
+}

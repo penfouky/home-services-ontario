@@ -1,0 +1,168 @@
+name: Crew's Tonie Box
+
+on:
+  push:
+    paths: ["crews-tonie-box/**", ".github/workflows/crews-tonie-box.yml"]
+  pull_request:
+    paths: ["crews-tonie-box/**", ".github/workflows/crews-tonie-box.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: 1
+  DOTNET_NOLOGO: 1
+  # rcodesign reads every RCODESIGN_* variable as a setting, so these are named differently
+  APPLE_CODESIGN_URL: https://github.com/indygreg/apple-platform-rs/releases/download/apple-codesign%2F0.29.0/apple-codesign-0.29.0-x86_64-unknown-linux-musl.tar.gz
+  APPLE_CODESIGN_SHA256: dbe85cedd8ee4217b64e9a0e4c2aef92ab8bcaaa41f20bde99781ff02e600002
+
+jobs:
+  # the Mac app is cross-built on Linux (the zip that gets handed out), and the Linux build runs all tests
+  linux:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: crews-tonie-box
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - name: Install build and test tools
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q sox lame opus-tools ffmpeg
+          python -m pip install ziglang numpy
+          curl -fsSL "$APPLE_CODESIGN_URL" -o rcodesign.tgz
+          echo "$APPLE_CODESIGN_SHA256  rcodesign.tgz" | sha256sum -c
+          mkdir -p "$RUNNER_TEMP/rcodesign" && tar xzf rcodesign.tgz -C "$RUNNER_TEMP/rcodesign" --strip-components=1
+          echo "RCODESIGN=$RUNNER_TEMP/rcodesign/rcodesign" >> "$GITHUB_ENV"
+          cd tests && npm install --no-save --no-package-lock playwright@1 && npx playwright install --with-deps chromium
+
+      - name: Build for Apple Silicon (cross-compiled, signed with rcodesign)
+        run: ./build.sh osx-arm64
+      - name: Build for Linux, to run the tests here
+        run: ./build.sh linux-x64
+
+      - name: teddy end-to-end test
+        run: tests/e2e.sh build/publish-linux-x64/teddy/teddy
+      - name: App API test
+        run: python tests/api_test.py build/publish-linux-x64/app/CrewsTonieBox build/publish-linux-x64/teddy/teddy build/toniesV2.json
+      - name: Import, NFC and SD-card tests
+        run: |
+          python tests/import_test.py build/publish-linux-x64/app/CrewsTonieBox
+          python tests/nfc_test.py build/publish-linux-x64/app/CrewsTonieBox
+          python tests/disks_test.py build/publish-linux-x64/app/CrewsTonieBox
+      - name: App UI test (Chromium)
+        run: node tests/ui_tour.js --app build/publish-linux-x64/app/CrewsTonieBox --teddy build/publish-linux-x64/teddy/teddy --tonies-json build/toniesV2.json --browser chromium --out screenshots-chromium
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: screenshots-chromium
+          path: crews-tonie-box/screenshots-chromium
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@v7
+        with:
+          name: crews-tonie-box-macos-arm64
+          path: |
+            crews-tonie-box/dist/Crews-Tonie-Box-*-macos-arm64.zip
+            crews-tonie-box/dist/teddy-*-macos-arm64.zip
+      - uses: actions/upload-artifact@v7
+        with:
+          name: tonies-list
+          path: crews-tonie-box/build/toniesV2.json
+
+  # the same zips on a real Apple Silicon Mac: signature, the window, WebKit, and the native build
+  mac:
+    needs: linux
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: crews-tonie-box
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: 1
+      HOMEBREW_NO_INSTALL_CLEANUP: 1
+    steps:
+      - run: sw_vers && uname -m && sysctl -n machdep.cpu.brand_string
+        working-directory: .
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - name: Install test tools
+        run: |
+          brew install sox lame opus-tools
+          python -m pip install ziglang numpy
+          cd tests && npm install --no-save --no-package-lock playwright@1 && npx playwright install webkit
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: crews-tonie-box-macos-arm64
+          path: crews-tonie-box/from-linux
+      - uses: actions/download-artifact@v8
+        with:
+          name: tonies-list
+          path: crews-tonie-box/from-linux
+      - name: Unpack the zips built on Linux
+        run: |
+          cd from-linux
+          ditto -x -k Crews-Tonie-Box-*-macos-arm64.zip .
+          ditto -x -k teddy-*-macos-arm64.zip .
+          ls -la . "Crew's Tonie Box.app/Contents" "Crew's Tonie Box.app/Contents/MacOS"
+      - name: Signature of the app built on Linux
+        run: |
+          app="from-linux/Crew's Tonie Box.app"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          codesign --display --verbose=2 "$app"
+          codesign --verify --strict --verbose=2 from-linux/teddy/teddy from-linux/teddy/libtonieopus.dylib
+          # not notarized, so Gatekeeper is expected to say "rejected"; shown for information
+          spctl --assess --type execute --verbose=4 "$app" || true
+          "$app/Contents/MacOS/CrewsTonieBox" --version
+
+      - name: teddy end-to-end test (built on Linux)
+        run: tests/e2e.sh from-linux/teddy/teddy
+      - name: App API test (built on Linux)
+        run: python tests/api_test.py "from-linux/Crew's Tonie Box.app/Contents/MacOS/CrewsTonieBox" from-linux/teddy/teddy from-linux/toniesV2.json
+      - name: Import, NFC and SD-card tests (built on Linux)
+        run: |
+          app="from-linux/Crew's Tonie Box.app/Contents/MacOS/CrewsTonieBox"
+          python tests/import_test.py "$app"
+          python tests/nfc_test.py "$app"
+          python tests/disks_test.py "$app"
+      - name: App UI test (WebKit, the engine of the app's window)
+        run: node tests/ui_tour.js --app "from-linux/Crew's Tonie Box.app/Contents/MacOS/CrewsTonieBox" --teddy from-linux/teddy/teddy --tonies-json from-linux/toniesV2.json --browser webkit --out screenshots-webkit
+      - name: Open the real app window
+        run: |
+          work=$(mktemp -d)
+          mkdir -p "$work/sd" screenshots-webkit
+          python tests/fixtures.py from-linux/teddy/teddy "$work/sd" from-linux/toniesV2.json > /dev/null
+          "from-linux/Crew's Tonie Box.app/Contents/MacOS/CrewsTonieBox" --data "$work/data" --sd-root "$work/sd" &
+          pid=$!
+          for _ in $(seq 60); do grep -q "page connected" "$work/data/app.log" 2>/dev/null && break; sleep 1; done
+          sleep 5
+          screencapture -x screenshots-webkit/window.png || true
+          cat "$work/data/app.log"
+          kill "$pid"
+          wait "$pid" || true
+          grep -q "window opened" "$work/data/app.log"
+          # the page loaded in the real native window; Photino's macOS WKWebView reports its
+          # user agent as "Photino WebView" (a plain browser engine would say AppleWebKit)
+          grep -qE "page connected: .*(Photino|AppleWebKit)" "$work/data/app.log"
+
+      - name: Build natively on the Mac (signed with codesign)
+        run: ./build.sh osx-arm64
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: screenshots-webkit
+          path: crews-tonie-box/screenshots-webkit
+          if-no-files-found: ignore

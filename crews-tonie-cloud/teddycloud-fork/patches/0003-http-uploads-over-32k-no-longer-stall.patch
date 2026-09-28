@@ -1,0 +1,30 @@
+diff --git a/src/platform/platform_linux.c b/src/platform/platform_linux.c
+index ad3aba1..1327e4f 100644
+--- a/src/platform/platform_linux.c
++++ b/src/platform/platform_linux.c
+@@ -313,7 +313,9 @@ error_t socketReceive(Socket *socket, void *data_in,
+             }
+         }
+ 
+-        if (buff->buffer_used >= size)
++        /* never hand out more than the caller asked for, but keep a line break found above:
++           a full buffer must not turn one header line into the whole buffer */
++        if (buff->buffer_used >= size && (return_count == 0 || return_count > size))
+         {
+             return_count = size;
+         }
+diff --git a/src/platform/platform_windows.c b/src/platform/platform_windows.c
+index 1f001b6..c3fb998 100644
+--- a/src/platform/platform_windows.c
++++ b/src/platform/platform_windows.c
+@@ -362,7 +362,9 @@ error_t socketReceive(Socket *socket, void *data_in,
+             }
+         }
+ 
+-        if (buff->buffer_used >= size)
++        /* never hand out more than the caller asked for, but keep a line break found above:
++           a full buffer must not turn one header line into the whole buffer */
++        if (buff->buffer_used >= size && (return_count == 0 || return_count > size))
+         {
+             return_count = size;
+         }

@@ -1,0 +1,2688 @@
+diff --git a/Teddy/Program.cs b/Teddy/Program.cs
+index 8b54bd6..4088bfd 100644
+--- a/Teddy/Program.cs
++++ b/Teddy/Program.cs
+@@ -36,6 +36,7 @@ using System.Collections.Generic;
+ using System.IO;
+ using System.Linq;
+ using System.Net;
++using System.Runtime.InteropServices;
+ using System.Security.Cryptography;
+ using System.Text;
+ using System.Text.RegularExpressions;
+@@ -47,6 +48,9 @@ namespace Teddy
+     {
+         public static int Verbosity = 0;
+ 
++        /* name shown in the help, the macOS/Linux build is called "teddy" */
++        private static readonly string ExeName = RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "Teddy.exe" : "teddy";
++
+         private static TonieTools.TonieData[] TonieInfos = new TonieTools.TonieData[0];
+ 
+ 
+@@ -199,9 +203,9 @@ namespace Teddy
+             }
+             catch (OptionException e)
+             {
+-                Console.Write("Teddy.exe: ");
++                Console.Write(ExeName + ": ");
+                 Console.WriteLine(e.Message);
+-                Console.WriteLine("Try `Teddy.exe --help' for more information.");
++                Console.WriteLine("Try `" + ExeName + " --help' for more information.");
+                 return;
+             }
+ 
+@@ -403,7 +407,7 @@ namespace Teddy
+                             {
+                                 StringBuilder message = new StringBuilder();
+ 
+-                                TonieTools.DumpInfo(message, dumpFormat, file, TonieInfos);
++                                TonieTools.DumpInfo(message, dumpFormat, file, TonieInfos, null, first);
+ 
+                                 Console.Write(message.ToString());
+                             }
+@@ -749,6 +753,30 @@ distributed under the License is distributed on an 'AS IS' BASIS,
+ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ See the License for the specific language governing permissions and
+ limitations under the License.
++");
++            Console.WriteLine();
++            Console.WriteLine();
++            Console.WriteLine("Contains MIT license for 'NLayer' (https://github.com/naudio/NLayer) ");
++            Console.WriteLine(@"
++   Copyright (c) 2018 Mark Heath, Andrew Ward & Contributors
++
++   Permission is hereby granted, free of charge, to any person obtaining a copy
++   of this software and associated documentation files (the 'Software'), to deal
++   in the Software without restriction, including without limitation the rights
++   to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
++   copies of the Software, and to permit persons to whom the Software is
++   furnished to do so, subject to the following conditions:
++
++   The above copyright notice and this permission notice shall be included in all
++   copies or substantial portions of the Software.
++
++   THE SOFTWARE IS PROVIDED 'AS IS', WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++   AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
++   SOFTWARE.
+ ");
+             Console.WriteLine();
+             Console.WriteLine();
+@@ -809,6 +837,12 @@ limitations under the License.
+         {
+             foreach (var file in new DirectoryInfo(v).GetFiles())
+             {
++                /* skip the "._" AppleDouble files macOS leaves on FAT/exFAT drives */
++                if (file.Name.StartsWith("._"))
++                {
++                    continue;
++                }
++
+                 /* search for original tonie files or those we renamed */
+                 if (file.Name.EndsWith("0304E0") || Regex.Matches(file.Name, @"[A-Za-z0-9-]+ - [A-F0-9]+ - .*").Count == 1)
+                 {
+@@ -832,10 +866,10 @@ limitations under the License.
+             Console.WriteLine("                         (build " + GetVersion() + ")");
+             Console.WriteLine("");
+             Console.WriteLine("Start with:");
+-            Console.WriteLine("  Teddy.exe -m decode [options] <toniefile>          - Dump tonie file content");
+-            Console.WriteLine("  Teddy.exe -m info [options] <toniefile>            - Show header details");
+-            Console.WriteLine("  Teddy.exe -m encode [options] <folder>             - Create a tonie file from all MP3 in this folder");
+-            Console.WriteLine("  Teddy.exe -m encode [options] <file1> <file2> ...  - Create a tonie file from specified MP3 files");
++            Console.WriteLine("  " + ExeName + " -m decode [options] <toniefile>          - Dump tonie file content");
++            Console.WriteLine("  " + ExeName + " -m info [options] <toniefile>            - Show header details");
++            Console.WriteLine("  " + ExeName + " -m encode [options] <folder>             - Create a tonie file from all MP3 in this folder");
++            Console.WriteLine("  " + ExeName + " -m encode [options] <file1> <file2> ...  - Create a tonie file from specified MP3 files");
+             Console.WriteLine("");
+             Console.WriteLine("Options:");
+             p.WriteOptionDescriptions(Console.Out);
+diff --git a/Teddy/Teddy.csproj b/Teddy/Teddy.csproj
+index 9c9059d..8ca577b 100644
+--- a/Teddy/Teddy.csproj
++++ b/Teddy/Teddy.csproj
+@@ -1,11 +1,20 @@
+ ﻿<Project Sdk="Microsoft.NET.Sdk">
+   <PropertyGroup>
+-    <TargetFramework>net48</TargetFramework>
++    <TargetFrameworks>net48;net10.0</TargetFrameworks>
+     <OutputType>Exe</OutputType>
+     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
++  </PropertyGroup>
++  <PropertyGroup Condition="'$(TargetFramework)' == 'net48'">
+     <UseWindowsForms>true</UseWindowsForms>
+     <ImportWindowsDesktopTargets>true</ImportWindowsDesktopTargets>
+   </PropertyGroup>
++  <!-- cross-platform build, e.g. for macOS: dotnet publish -f net10.0 -r osx-arm64 -->
++  <PropertyGroup Condition="'$(TargetFramework)' == 'net10.0'">
++    <AssemblyName>teddy</AssemblyName>
++    <!-- self-contained builds leave out the parts of .NET teddy never uses -->
++    <PublishTrimmed>true</PublishTrimmed>
++    <TrimMode>partial</TrimMode>
++  </PropertyGroup>
+   <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Debug|x64'">
+     <OutputPath>bin\x64\Debug\</OutputPath>
+     <CodeAnalysisRuleSet>MinimumRecommendedRules.ruleset</CodeAnalysisRuleSet>
+diff --git a/TonieAudio/AudioInput.cs b/TonieAudio/AudioInput.cs
+new file mode 100644
+index 0000000..f59b1d8
+--- /dev/null
++++ b/TonieAudio/AudioInput.cs
+@@ -0,0 +1,589 @@
++﻿using Concentus.Oggfile;
++using Id3;
++using NAudio.Wave;
++using NAudio.Wave.SampleProviders;
++using NLayer.NAudioSupport;
++using NVorbis;
++using System;
++using System.Collections.Generic;
++using System.Diagnostics;
++using System.IO;
++using System.Linq;
++using System.Runtime.InteropServices;
++using System.Text;
++
++namespace TonieFile
++{
++    /* an audio file opened for encoding, delivered as 16 bit PCM, 48 kHz stereo */
++    public class AudioSource : IDisposable
++    {
++        public IWaveProvider Pcm { get; internal set; }
++        internal WaveStream Stream;
++        internal string TempFile;
++
++        public double Progress => Stream == null || Stream.Length <= 0 ? 0 : Math.Min(1.0, (double)Stream.Position / Stream.Length);
++
++        public void Dispose()
++        {
++            Stream?.Dispose();
++            if (TempFile != null)
++            {
++                try
++                {
++                    File.Delete(TempFile);
++                }
++                catch (Exception)
++                {
++                }
++            }
++        }
++    }
++
++    public class AudioInfo
++    {
++        public string File;
++        public string Title;
++        public string Artist;
++        public string Album;
++        public int Track;
++        public double Seconds;
++    }
++
++    public static class AudioInput
++    {
++        /* decoded in managed code everywhere */
++        private static readonly string[] ManagedExtensions = { ".mp3", ".ogg", ".oga", ".opus", ".wav", ".wave", ".aif", ".aiff", ".aifc" };
++        /* decoded by macOS (afconvert) or ffmpeg */
++        private static readonly string[] SystemExtensions = { ".m4a", ".m4b", ".mp4", ".aac", ".alac", ".caf", ".flac", ".wma", ".webm", ".mka" };
++
++        private const int SampleRate = 48000;
++        /* Speex quality 5: 80 taps, ~100 dB stopband, passband up to 20 kHz for 44.1 kHz sources */
++        private const int ResamplerQuality = 5;
++
++        /* the ACM MP3 codec and MediaFoundationResampler only exist on Windows, use managed code elsewhere */
++        private static bool UseWindowsCodecs => RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
++
++        private static bool IsMac => RuntimeInformation.IsOSPlatform(OSPlatform.OSX);
++
++        public static string[] Extensions => ManagedExtensions.Concat(SystemExtensions).ToArray();
++
++        public static bool IsSupported(string fileName)
++        {
++            string name = Path.GetFileName(fileName);
++            /* skip the "._name.mp3" AppleDouble files macOS leaves on FAT/exFAT drives */
++            return !name.StartsWith("._") && Extensions.Contains(Path.GetExtension(name).ToLowerInvariant());
++        }
++
++        public static AudioSource Open(string fileName)
++        {
++            var source = new AudioSource();
++            try
++            {
++                source.Stream = Standard(OpenStream(fileName, out source.TempFile));
++                source.Pcm = ConvertFormat(source.Stream);
++                return source;
++            }
++            catch (Exception)
++            {
++                source.Dispose();
++                throw;
++            }
++        }
++
++        private static WaveStream OpenStream(string fileName, out string tempFile)
++        {
++            tempFile = null;
++            switch (Path.GetExtension(fileName).ToLowerInvariant())
++            {
++                case ".mp3":
++                    return OpenMp3(fileName);
++
++                case ".ogg":
++                case ".oga":
++                case ".opus":
++                    switch (OggCodec(fileName))
++                    {
++                        case "opus":
++                            return new OpusWaveStream(File.Open(fileName, FileMode.Open, FileAccess.Read, FileShare.ReadWrite), SampleRate, 2);
++                        case "vorbis":
++                            return new VorbisWaveStream(fileName);
++                    }
++                    break;
++
++                case ".wav":
++                case ".wave":
++                    try
++                    {
++                        return new WaveFileReader(fileName);
++                    }
++                    catch (Exception) when (CanConvert())
++                    {
++                        /* compressed WAV, e.g. ADPCM */
++                    }
++                    break;
++
++                case ".aif":
++                case ".aiff":
++                case ".aifc":
++                    try
++                    {
++                        return new AiffFileReader(fileName);
++                    }
++                    catch (Exception) when (CanConvert())
++                    {
++                        /* compressed AIFF-C */
++                    }
++                    break;
++            }
++
++            tempFile = ConvertToWav(fileName);
++            return new WaveFileReader(tempFile);
++        }
++
++        private static WaveStream OpenMp3(string fileName)
++        {
++            if (UseWindowsCodecs)
++            {
++                /* same as NAudio's Mp3FileReader */
++                return new Mp3FileReaderBase(fileName, format => new AcmMp3FrameDecompressor(format));
++            }
++            return new Mp3FileReaderBase(fileName, format => new Mp3FrameDecompressor(format));
++        }
++
++        /* "opus", "vorbis" or null, from the first packet of an Ogg file */
++        private static string OggCodec(string fileName)
++        {
++            byte[] head = new byte[64];
++            using (var file = File.Open(fileName, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
++            {
++                file.Read(head, 0, head.Length);
++            }
++            string text = Encoding.ASCII.GetString(head);
++            if (!text.StartsWith("OggS"))
++            {
++                return null;
++            }
++            if (text.Contains("OpusHead"))
++            {
++                return "opus";
++            }
++            if (text.Contains("vorbis"))
++            {
++                return "vorbis";
++            }
++            return null;
++        }
++
++        /* WAVE_FORMAT_EXTENSIBLE, which ffmpeg, macOS and many recorders write for 24 bit and float audio,
++           as the plain PCM or float format NAudio can convert */
++        private static WaveStream Standard(WaveStream stream)
++        {
++            var format = stream.WaveFormat;
++            if (format.Encoding != WaveFormatEncoding.Extensible)
++            {
++                return stream;
++            }
++            ushort subFormat = 0;
++            if (format is WaveFormatExtensible extensible)
++            {
++                subFormat = BitConverter.ToUInt16(extensible.SubFormat.ToByteArray(), 0);
++            }
++            else if (format is WaveFormatExtraData extra && extra.ExtraSize >= 22)
++            {
++                /* cbSize 22: valid bits (2), channel mask (4), sub format GUID (16) starting with the format code */
++                subFormat = BitConverter.ToUInt16(extra.ExtraData, 6);
++            }
++            switch (subFormat)
++            {
++                case 1:
++                    return new FormatOverride(stream, new WaveFormat(format.SampleRate, format.BitsPerSample, format.Channels));
++                case 3:
++                    return new FormatOverride(stream, WaveFormat.CreateIeeeFloatWaveFormat(format.SampleRate, format.Channels));
++                default:
++                    return stream;
++            }
++        }
++
++        private class FormatOverride : WaveStream
++        {
++            private readonly WaveStream source;
++            private readonly WaveFormat format;
++
++            public FormatOverride(WaveStream source, WaveFormat format)
++            {
++                this.source = source;
++                this.format = format;
++            }
++
++            public override WaveFormat WaveFormat => format;
++            public override long Length => source.Length;
++
++            public override long Position
++            {
++                get => source.Position;
++                set => source.Position = value;
++            }
++
++            public override int Read(byte[] buffer, int offset, int count) => source.Read(buffer, offset, count);
++
++            protected override void Dispose(bool disposing)
++            {
++                if (disposing)
++                {
++                    source.Dispose();
++                }
++                base.Dispose(disposing);
++            }
++        }
++
++        /* returns the stream's audio as 16 bit PCM in 48 kHz stereo */
++        internal static IWaveProvider ConvertFormat(WaveStream stream)
++        {
++            var outFormat = new WaveFormat(SampleRate, 2);
++
++            if (UseWindowsCodecs)
++            {
++                return new MediaFoundationResampler(stream, outFormat);
++            }
++
++            ISampleProvider samples = stream.ToSampleProvider();
++
++            if (samples.WaveFormat.Channels == 1)
++            {
++                samples = new MonoToStereoSampleProvider(samples);
++            }
++            else if (samples.WaveFormat.Channels > 2)
++            {
++                samples = new StereoDownmix(samples);
++            }
++
++            IWaveProvider pcm = new SampleToWaveProvider16(samples);
++
++            if (pcm.WaveFormat.SampleRate != SampleRate)
++            {
++                pcm = new SpeexResamplingWaveProvider(pcm, SampleRate, ResamplerQuality);
++            }
++
++            return new FullReadWaveProvider(pcm);
++        }
++
++        public static bool CanConvert()
++        {
++            return ConverterTool() != null;
++        }
++
++        private static string ConverterTool()
++        {
++            if (IsMac && File.Exists("/usr/bin/afconvert"))
++            {
++                return "/usr/bin/afconvert";
++            }
++            return FindInPath("ffmpeg");
++        }
++
++        private static string FindInPath(string tool)
++        {
++            string path = Environment.GetEnvironmentVariable("PATH") ?? "";
++            foreach (string dir in path.Split(Path.PathSeparator).Concat(new[] { "/opt/homebrew/bin", "/usr/local/bin" }))
++            {
++                string candidate = Path.Combine(dir, tool + (UseWindowsCodecs ? ".exe" : ""));
++                if (!string.IsNullOrEmpty(dir) && File.Exists(candidate))
++                {
++                    return candidate;
++                }
++            }
++            return null;
++        }
++
++        /* decodes formats like AAC/M4A, ALAC or FLAC with macOS' own decoders (or ffmpeg) into a temporary WAV file */
++        private static string ConvertToWav(string fileName)
++        {
++            string tool = ConverterTool();
++            if (tool == null)
++            {
++                throw new InvalidDataException("'" + Path.GetFileName(fileName) + "' is in a format that needs ffmpeg on this system");
++            }
++
++            string wav = Path.Combine(Path.GetTempPath(), "tonie-" + Guid.NewGuid().ToString("N") + ".wav");
++            string[] arguments = tool.EndsWith("afconvert")
++                ? new[] { "-f", "WAVE", "-d", "LEF32", fileName, wav }
++                : new[] { "-v", "error", "-nostdin", "-y", "-i", fileName, "-vn", "-c:a", "pcm_f32le", "-f", "wav", wav };
++
++            if (!Run(tool, arguments, out string output) || !File.Exists(wav))
++            {
++                try
++                {
++                    File.Delete(wav);
++                }
++                catch (Exception)
++                {
++                }
++                throw new InvalidDataException("Could not read '" + Path.GetFileName(fileName) + "': " + output.Trim());
++            }
++            return wav;
++        }
++
++        internal static bool Run(string tool, string[] arguments, out string output)
++        {
++            var info = new ProcessStartInfo(tool, string.Join(" ", arguments.Select(Quote)))
++            {
++                UseShellExecute = false,
++                RedirectStandardOutput = true,
++                RedirectStandardError = true,
++                CreateNoWindow = true
++            };
++            using (var process = Process.Start(info))
++            {
++                var stderr = process.StandardError.ReadToEndAsync();
++                string stdout = process.StandardOutput.ReadToEnd();
++                process.WaitForExit();
++                output = stdout + stderr.Result;
++                return process.ExitCode == 0;
++            }
++        }
++
++        private static string Quote(string argument)
++        {
++            return "\"" + argument.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
++        }
++
++        /* title, track number and duration for showing a file before it is encoded */
++        public static AudioInfo Probe(string fileName)
++        {
++            var info = new AudioInfo { File = fileName, Title = CleanName(fileName) };
++            string ext = Path.GetExtension(fileName).ToLowerInvariant();
++
++            try
++            {
++                if (ext == ".mp3")
++                {
++                    using (var mp3 = new Mp3(fileName, Mp3Permissions.Read))
++                    {
++                        var tag = mp3.GetAllTags().FirstOrDefault();
++                        if (tag != null)
++                        {
++                            if (tag.Title.IsAssigned && !string.IsNullOrWhiteSpace(tag.Title.Value))
++                            {
++                                info.Title = tag.Title.Value.Trim();
++                            }
++                            if (tag.Artists.IsAssigned)
++                            {
++                                info.Artist = tag.Artists.Value.FirstOrDefault();
++                            }
++                            if (tag.Album.IsAssigned)
++                            {
++                                info.Album = tag.Album.Value;
++                            }
++                            if (tag.Track.IsAssigned)
++                            {
++                                info.Track = tag.Track.Value;
++                            }
++                        }
++                    }
++                }
++            }
++            catch (Exception)
++            {
++                /* broken tags do not matter here */
++            }
++
++            try
++            {
++                if (ext == ".mp3" || ext == ".wav" || ext == ".wave" || ext == ".aif" || ext == ".aiff" || ext == ".aifc" || OggCodec(fileName) != null)
++                {
++                    using (var stream = OpenStream(fileName, out string temp))
++                    {
++                        /* OpusWaveStream counts its length in ticks */
++                        info.Seconds = stream is OpusWaveStream opus ? opus.OpusDecoder.TotalTime.TotalSeconds : stream.TotalTime.TotalSeconds;
++                        if (stream is VorbisWaveStream vorbis)
++                        {
++                            info.Title = vorbis.Title ?? info.Title;
++                            info.Artist = vorbis.Artist;
++                        }
++                    }
++                }
++                else if (IsMac && File.Exists("/usr/bin/afinfo") && Run("/usr/bin/afinfo", new[] { fileName }, out string output))
++                {
++                    foreach (string line in output.Split('\n'))
++                    {
++                        string text = line.Trim();
++                        if (text.StartsWith("estimated duration:") && double.TryParse(text.Split(' ')[2], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double seconds))
++                        {
++                            info.Seconds = seconds;
++                        }
++                        else if (text.StartsWith("title:"))
++                        {
++                            info.Title = text.Substring(6).Trim();
++                        }
++                        else if (text.StartsWith("artist:"))
++                        {
++                            info.Artist = text.Substring(7).Trim();
++                        }
++                    }
++                }
++                else if (FindInPath("ffprobe") is string ffprobe && Run(ffprobe, new[] { "-v", "error", "-show_entries", "format=duration:format_tags=title,artist,track", "-of", "default=noprint_wrappers=1", fileName }, out string probe))
++                {
++                    foreach (string line in probe.Split('\n'))
++                    {
++                        string[] kv = line.Trim().Split(new[] { '=' }, 2);
++                        if (kv.Length < 2)
++                        {
++                            continue;
++                        }
++                        switch (kv[0].ToLowerInvariant())
++                        {
++                            case "duration":
++                                double.TryParse(kv[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out info.Seconds);
++                                break;
++                            case "tag:title":
++                                info.Title = kv[1];
++                                break;
++                            case "tag:artist":
++                                info.Artist = kv[1];
++                                break;
++                            case "tag:track":
++                                int.TryParse(kv[1].Split('/')[0], out info.Track);
++                                break;
++                        }
++                    }
++                }
++            }
++            catch (Exception)
++            {
++                info.Seconds = 0;
++            }
++            return info;
++        }
++
++        /* "03 - The Big Bear.mp3" -> "The Big Bear" */
++        public static string CleanName(string fileName)
++        {
++            string name = Path.GetFileNameWithoutExtension(fileName).Replace('_', ' ').Trim();
++            string stripped = System.Text.RegularExpressions.Regex.Replace(name, @"^(track\s*)?\d{1,3}\s*[-._)\]]*\s*", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase).Trim();
++            return stripped.Length > 0 ? stripped : name;
++        }
++
++        /* ConvertToFloat() and the encoder loop expect full buffers except at the end of the stream */
++        private class FullReadWaveProvider : IWaveProvider
++        {
++            private readonly IWaveProvider Source;
++
++            public FullReadWaveProvider(IWaveProvider source)
++            {
++                Source = source;
++            }
++
++            public WaveFormat WaveFormat => Source.WaveFormat;
++
++            public int Read(byte[] buffer, int offset, int count)
++            {
++                int total = 0;
++
++                while (total < count)
++                {
++                    int read = Source.Read(buffer, offset + total, count - total);
++
++                    if (read <= 0)
++                    {
++                        break;
++                    }
++                    total += read;
++                }
++                return total;
++            }
++        }
++
++        /* folds any number of channels into stereo: even channels left, odd channels right */
++        private class StereoDownmix : ISampleProvider
++        {
++            private readonly ISampleProvider Source;
++            private readonly int Channels;
++            private float[] Buffer = new float[0];
++
++            public WaveFormat WaveFormat { get; }
++
++            public StereoDownmix(ISampleProvider source)
++            {
++                Source = source;
++                Channels = source.WaveFormat.Channels;
++                WaveFormat = WaveFormat.CreateIeeeFloatWaveFormat(source.WaveFormat.SampleRate, 2);
++            }
++
++            public int Read(float[] buffer, int offset, int count)
++            {
++                int frames = count / 2;
++                if (Buffer.Length < frames * Channels)
++                {
++                    Buffer = new float[frames * Channels];
++                }
++                int read = Source.Read(Buffer, 0, frames * Channels) / Channels;
++                float scale = 2.0f / Channels;
++                for (int frame = 0; frame < read; frame++)
++                {
++                    float left = 0, right = 0;
++                    for (int ch = 0; ch < Channels; ch++)
++                    {
++                        if ((ch & 1) == 0)
++                        {
++                            left += Buffer[frame * Channels + ch];
++                        }
++                        else
++                        {
++                            right += Buffer[frame * Channels + ch];
++                        }
++                    }
++                    buffer[offset + 2 * frame] = left * scale;
++                    buffer[offset + 2 * frame + 1] = right * scale;
++                }
++                return read * 2;
++            }
++        }
++
++        /* Ogg Vorbis files, decoded by NVorbis */
++        private class VorbisWaveStream : WaveStream
++        {
++            private readonly VorbisReader Reader;
++            private float[] Buffer = new float[0];
++
++            public string Title => Reader.Tags?.Title;
++            public string Artist => Reader.Tags?.Artist;
++
++            public VorbisWaveStream(string fileName)
++            {
++                Reader = new VorbisReader(fileName);
++                WaveFormat = WaveFormat.CreateIeeeFloatWaveFormat(Reader.SampleRate, Reader.Channels);
++            }
++
++            public override WaveFormat WaveFormat { get; }
++
++            public override long Length => (long)(Reader.TotalTime.TotalSeconds * WaveFormat.AverageBytesPerSecond);
++
++            public override long Position
++            {
++                get => (long)(Reader.TimePosition.TotalSeconds * WaveFormat.AverageBytesPerSecond);
++                set => Reader.TimePosition = TimeSpan.FromSeconds((double)value / WaveFormat.AverageBytesPerSecond);
++            }
++
++            public override int Read(byte[] buffer, int offset, int count)
++            {
++                int samples = count / 4;
++                if (Buffer.Length < samples)
++                {
++                    Buffer = new float[samples];
++                }
++                int read = Reader.ReadSamples(Buffer, 0, samples);
++                System.Buffer.BlockCopy(Buffer, 0, buffer, offset, read * 4);
++                return read * 4;
++            }
++
++            protected override void Dispose(bool disposing)
++            {
++                if (disposing)
++                {
++                    Reader.Dispose();
++                }
++                base.Dispose(disposing);
++            }
++        }
++    }
++}
+diff --git a/TonieAudio/Ogg.cs b/TonieAudio/Ogg.cs
+new file mode 100644
+index 0000000..cc281a4
+--- /dev/null
++++ b/TonieAudio/Ogg.cs
+@@ -0,0 +1,262 @@
++﻿using System;
++using System.Collections.Generic;
++
++namespace TonieFile
++{
++    /* minimal Ogg container support (RFC 3533) for Opus streams */
++    public static class Ogg
++    {
++        public const byte FlagContinued = 1;
++        public const byte FlagFirst = 2;
++        public const byte FlagLast = 4;
++        public const int HeaderSize = 27;
++
++        private static readonly uint[] CrcTable = BuildCrcTable();
++
++        private static uint[] BuildCrcTable()
++        {
++            var table = new uint[256];
++            for (uint index = 0; index < 256; index++)
++            {
++                uint crc = index << 24;
++                for (int bit = 0; bit < 8; bit++)
++                {
++                    crc = (crc & 0x80000000) != 0 ? (crc << 1) ^ 0x04C11DB7 : crc << 1;
++                }
++                table[index] = crc;
++            }
++            return table;
++        }
++
++        public static uint Crc(byte[] data, int offset, int length)
++        {
++            uint crc = 0;
++            for (int pos = offset; pos < offset + length; pos++)
++            {
++                crc = (crc << 8) ^ CrcTable[((crc >> 24) ^ data[pos]) & 0xFF];
++            }
++            return crc;
++        }
++
++        /* CRC of a stored page, computed with its checksum field as zero */
++        public static uint PageCrc(byte[] data, int offset, int length)
++        {
++            uint crc = 0;
++            for (int pos = offset; pos < offset + length; pos++)
++            {
++                byte value = (pos >= offset + 22 && pos < offset + 26) ? (byte)0 : data[pos];
++                crc = (crc << 8) ^ CrcTable[((crc >> 24) ^ value) & 0xFF];
++            }
++            return crc;
++        }
++
++        /* lacing values a packet of this size needs */
++        public static int LacingCount(int packetSize)
++        {
++            return packetSize / 255 + 1;
++        }
++
++        /* size of a page holding these complete packets */
++        public static int PageSize(IList<ArraySegment<byte>> packets)
++        {
++            int size = HeaderSize;
++            foreach (var packet in packets)
++            {
++                size += LacingCount(packet.Count) + packet.Count;
++            }
++            return size;
++        }
++
++        /* a page made of complete packets */
++        public static byte[] BuildPage(IList<ArraySegment<byte>> packets, byte flags, long granule, int serial, int sequence)
++        {
++            int lacing = 0;
++            foreach (var packet in packets)
++            {
++                lacing += LacingCount(packet.Count);
++            }
++            if (lacing > 255)
++            {
++                throw new ArgumentException("Too many segments for one Ogg page");
++            }
++
++            byte[] page = new byte[PageSize(packets)];
++            page[0] = (byte)'O';
++            page[1] = (byte)'g';
++            page[2] = (byte)'g';
++            page[3] = (byte)'S';
++            page[4] = 0;
++            page[5] = flags;
++            WriteLE(page, 6, (ulong)granule, 8);
++            WriteLE(page, 14, (uint)serial, 4);
++            WriteLE(page, 18, (uint)sequence, 4);
++            page[26] = (byte)lacing;
++
++            int segment = HeaderSize;
++            int data = HeaderSize + lacing;
++            foreach (var packet in packets)
++            {
++                for (int remaining = packet.Count; ; remaining -= 255)
++                {
++                    page[segment++] = (byte)Math.Min(remaining, 255);
++                    if (remaining < 255)
++                    {
++                        break;
++                    }
++                }
++                Array.Copy(packet.Array, packet.Offset, page, data, packet.Count);
++                data += packet.Count;
++            }
++
++            WriteLE(page, 22, Crc(page, 0, page.Length), 4);
++            return page;
++        }
++
++        public static void WriteLE(byte[] buffer, int offset, ulong value, int bytes)
++        {
++            for (int pos = 0; pos < bytes; pos++)
++            {
++                buffer[offset + pos] = (byte)(value >> (8 * pos));
++            }
++        }
++
++        public class Page
++        {
++            public int Offset;
++            public int Length;
++            public byte Flags;
++            public long Granule;
++            public int Serial;
++            public uint Sequence;
++            /* index of the first packet that starts on this page */
++            public int FirstPacket;
++            /* packets that end on this page */
++            public int PacketCount;
++            public bool CrcValid;
++        }
++
++        public class Packet
++        {
++            public byte[] Buffer;
++            public int Offset;
++            public int Length;
++            /* page the packet ends on */
++            public int Page;
++        }
++
++        public class Stream
++        {
++            public readonly List<Page> Pages = new List<Page>();
++            public readonly List<Packet> Packets = new List<Packet>();
++            /* bytes after the last complete page, e.g. a truncated file */
++            public int TrailingBytes;
++        }
++
++        /* parses pages and packets, packets may continue on following pages */
++        public static Stream Parse(byte[] data, int offset, int length)
++        {
++            var stream = new Stream();
++            int end = offset + length;
++            int pos = offset;
++            List<ArraySegment<byte>> pending = null;
++
++            while (pos + HeaderSize <= end && data[pos] == 'O' && data[pos + 1] == 'g' && data[pos + 2] == 'g' && data[pos + 3] == 'S')
++            {
++                int segments = data[pos + 26];
++                if (pos + HeaderSize + segments > end)
++                {
++                    break;
++                }
++                int payload = 0;
++                for (int seg = 0; seg < segments; seg++)
++                {
++                    payload += data[pos + HeaderSize + seg];
++                }
++                int pageLength = HeaderSize + segments + payload;
++                if (pos + pageLength > end)
++                {
++                    break;
++                }
++
++                var page = new Page
++                {
++                    Offset = pos,
++                    Length = pageLength,
++                    Flags = data[pos + 5],
++                    Granule = BitConverter.ToInt64(data, pos + 6),
++                    Serial = BitConverter.ToInt32(data, pos + 14),
++                    Sequence = BitConverter.ToUInt32(data, pos + 18),
++                    FirstPacket = stream.Packets.Count
++                };
++                page.CrcValid = PageCrc(data, pos, pageLength) == BitConverter.ToUInt32(data, pos + 22);
++
++                if ((page.Flags & FlagContinued) == 0)
++                {
++                    pending = null;
++                }
++
++                int dataPos = pos + HeaderSize + segments;
++                int packetStart = dataPos;
++                int packetLength = 0;
++                for (int seg = 0; seg < segments; seg++)
++                {
++                    int lace = data[pos + HeaderSize + seg];
++                    packetLength += lace;
++                    dataPos += lace;
++                    if (lace < 255)
++                    {
++                        var part = new ArraySegment<byte>(data, packetStart, packetLength);
++                        Packet packet;
++                        if (pending != null)
++                        {
++                            pending.Add(part);
++                            packet = Join(pending);
++                            pending = null;
++                        }
++                        else
++                        {
++                            packet = new Packet { Buffer = data, Offset = packetStart, Length = packetLength };
++                        }
++                        packet.Page = stream.Pages.Count;
++                        stream.Packets.Add(packet);
++                        page.PacketCount++;
++                        packetStart = dataPos;
++                        packetLength = 0;
++                    }
++                }
++                if (packetLength > 0 || (segments > 0 && data[pos + HeaderSize + segments - 1] == 255))
++                {
++                    /* continues on the next page */
++                    if (pending == null)
++                    {
++                        pending = new List<ArraySegment<byte>>();
++                    }
++                    pending.Add(new ArraySegment<byte>(data, packetStart, packetLength));
++                }
++
++                stream.Pages.Add(page);
++                pos += pageLength;
++            }
++
++            stream.TrailingBytes = end - pos;
++            return stream;
++        }
++
++        private static Packet Join(List<ArraySegment<byte>> parts)
++        {
++            int length = 0;
++            foreach (var part in parts)
++            {
++                length += part.Count;
++            }
++            byte[] buffer = new byte[length];
++            int pos = 0;
++            foreach (var part in parts)
++            {
++                Array.Copy(part.Array, part.Offset, buffer, pos, part.Count);
++                pos += part.Count;
++            }
++            return new Packet { Buffer = buffer, Offset = 0, Length = length };
++        }
++    }
++}
+diff --git a/TonieAudio/OpusCodec.cs b/TonieAudio/OpusCodec.cs
+new file mode 100644
+index 0000000..a2538ac
+--- /dev/null
++++ b/TonieAudio/OpusCodec.cs
+@@ -0,0 +1,233 @@
++﻿using Concentus.Enums;
++using Concentus.Structs;
++using System;
++using System.Runtime.InteropServices;
++
++namespace TonieFile
++{
++    /* 48 kHz stereo Opus encoder working on 20 ms frames */
++    public interface IOpusEncoder : IDisposable
++    {
++        /* samples the decoder skips at the start (OpusHead pre-skip) */
++        int Lookahead { get; }
++
++        /* encodes 960 interleaved stereo samples, returns the packet size */
++        int Encode(float[] pcm, byte[] packet, int maxBytes);
++    }
++
++    public interface IOpusDecoder : IDisposable
++    {
++        /* decodes a packet into interleaved stereo samples, returns the samples per channel */
++        int Decode(byte[] packet, int offset, int length, float[] pcm);
++    }
++
++    /* uses the native libopus bundled with the app (libtonieopus) when it is there, else the managed Concentus port */
++    public static class OpusCodec
++    {
++        public const int SampleRate = 48000;
++        public const int Channels = 2;
++        public const int FrameSize = 960;
++
++        private static readonly string NativeVersion = LoadNative();
++
++        /* for tests and comparisons, TONIE_OPUS_MANAGED=1 selects Concentus */
++        public static bool ForceManaged { get; set; } = Environment.GetEnvironmentVariable("TONIE_OPUS_MANAGED") == "1";
++
++        public static bool UsesNative => NativeVersion != null && !ForceManaged;
++
++        public static string Name => UsesNative ? NativeVersion + " (native)" : "Concentus " + typeof(OpusEncoder).Assembly.GetName().Version + " (managed)";
++
++        private static string LoadNative()
++        {
++            try
++            {
++                return Marshal.PtrToStringAnsi(Native.tonie_opus_version());
++            }
++            catch (Exception)
++            {
++                /* DllNotFoundException, EntryPointNotFoundException or BadImageFormatException */
++                return null;
++            }
++        }
++
++        public static IOpusEncoder CreateEncoder(int bitRate, bool useVbr)
++        {
++            if (UsesNative)
++            {
++                return new NativeEncoder(bitRate, useVbr);
++            }
++            return new ManagedEncoder(bitRate, useVbr);
++        }
++
++        public static IOpusDecoder CreateDecoder()
++        {
++            if (UsesNative)
++            {
++                return new NativeDecoder();
++            }
++            return new ManagedDecoder();
++        }
++
++        /* grows a packet in place to newLength bytes using Opus padding, which decoders ignore */
++        public static bool Pad(byte[] packet, int length, int newLength)
++        {
++            if (newLength == length)
++            {
++                return true;
++            }
++            if (UsesNative)
++            {
++                return Native.tonie_opus_packet_pad(packet, length, newLength) == 0;
++            }
++            return OpusRepacketizer.PadPacket(packet, 0, length, newLength) == (int)OpusError.OPUS_OK;
++        }
++
++        private class NativeEncoder : IOpusEncoder
++        {
++            private IntPtr Handle;
++
++            public int Lookahead { get; }
++
++            public NativeEncoder(int bitRate, bool useVbr)
++            {
++                Handle = Native.tonie_opus_encoder_new(bitRate, useVbr ? 1 : 0, 10, out int lookahead, out int error);
++                if (Handle == IntPtr.Zero)
++                {
++                    throw new InvalidOperationException("Opus encoder could not be created (error " + error + ")");
++                }
++                Lookahead = lookahead;
++            }
++
++            public int Encode(float[] pcm, byte[] packet, int maxBytes)
++            {
++                int size = Native.tonie_opus_encode(Handle, pcm, FrameSize, packet, maxBytes);
++                if (size < 0)
++                {
++                    throw new InvalidOperationException("Opus encoding failed (error " + size + ")");
++                }
++                return size;
++            }
++
++            public void Dispose()
++            {
++                if (Handle != IntPtr.Zero)
++                {
++                    Native.tonie_opus_encoder_free(Handle);
++                    Handle = IntPtr.Zero;
++                }
++            }
++        }
++
++        private class NativeDecoder : IOpusDecoder
++        {
++            private IntPtr Handle;
++            private byte[] Scratch = new byte[1500];
++
++            public NativeDecoder()
++            {
++                Handle = Native.tonie_opus_decoder_new(out int error);
++                if (Handle == IntPtr.Zero)
++                {
++                    throw new InvalidOperationException("Opus decoder could not be created (error " + error + ")");
++                }
++            }
++
++            public int Decode(byte[] packet, int offset, int length, float[] pcm)
++            {
++                if (Scratch.Length < length)
++                {
++                    Scratch = new byte[length];
++                }
++                Array.Copy(packet, offset, Scratch, 0, length);
++                int samples = Native.tonie_opus_decode(Handle, Scratch, length, pcm, pcm.Length / Channels);
++                if (samples < 0)
++                {
++                    throw new InvalidOperationException("Opus decoding failed (error " + samples + ")");
++                }
++                return samples;
++            }
++
++            public void Dispose()
++            {
++                if (Handle != IntPtr.Zero)
++                {
++                    Native.tonie_opus_decoder_free(Handle);
++                    Handle = IntPtr.Zero;
++                }
++            }
++        }
++
++        private class ManagedEncoder : IOpusEncoder
++        {
++            private readonly OpusEncoder Encoder;
++            private readonly short[] Pcm16 = new short[FrameSize * Channels];
++
++            public int Lookahead => Encoder.Lookahead;
++
++            public ManagedEncoder(int bitRate, bool useVbr)
++            {
++                Encoder = OpusEncoder.Create(SampleRate, Channels, OpusApplication.OPUS_APPLICATION_AUDIO);
++                Encoder.Bitrate = bitRate;
++                Encoder.UseVBR = useVbr;
++            }
++
++            public int Encode(float[] pcm, byte[] packet, int maxBytes)
++            {
++                /* the 16 bit path, as teddy always used it */
++                for (int pos = 0; pos < Pcm16.Length; pos++)
++                {
++                    Pcm16[pos] = (short)Math.Max(short.MinValue, Math.Min(short.MaxValue, Math.Round(pcm[pos] * 32767)));
++                }
++                return Encoder.Encode(Pcm16, 0, FrameSize, packet, 0, maxBytes);
++            }
++
++            public void Dispose()
++            {
++            }
++        }
++
++        private class ManagedDecoder : IOpusDecoder
++        {
++            private readonly OpusDecoder Decoder = OpusDecoder.Create(SampleRate, Channels);
++
++            public int Decode(byte[] packet, int offset, int length, float[] pcm)
++            {
++                return Decoder.Decode(packet, offset, length, pcm, 0, pcm.Length / Channels, false);
++            }
++
++            public void Dispose()
++            {
++            }
++        }
++
++        /* libtonieopus: libopus plus fixed-argument wrappers, see native/tonie_opus.c */
++        private static class Native
++        {
++            private const string Lib = "tonieopus";
++
++            [DllImport(Lib)]
++            public static extern IntPtr tonie_opus_version();
++
++            [DllImport(Lib)]
++            public static extern IntPtr tonie_opus_encoder_new(int bitrate, int vbr, int complexity, out int lookahead, out int error);
++
++            [DllImport(Lib)]
++            public static extern int tonie_opus_encode(IntPtr encoder, float[] pcm, int frameSize, byte[] data, int maxBytes);
++
++            [DllImport(Lib)]
++            public static extern void tonie_opus_encoder_free(IntPtr encoder);
++
++            [DllImport(Lib)]
++            public static extern IntPtr tonie_opus_decoder_new(out int error);
++
++            [DllImport(Lib)]
++            public static extern int tonie_opus_decode(IntPtr decoder, byte[] data, int length, float[] pcm, int maxFrameSize);
++
++            [DllImport(Lib)]
++            public static extern void tonie_opus_decoder_free(IntPtr decoder);
++
++            [DllImport(Lib)]
++            public static extern int tonie_opus_packet_pad(byte[] data, int length, int newLength);
++        }
++    }
++}
+diff --git a/TonieAudio/SpeexResamplingWaveProvider.cs b/TonieAudio/SpeexResamplingWaveProvider.cs
+new file mode 100644
+index 0000000..b5b9789
+--- /dev/null
++++ b/TonieAudio/SpeexResamplingWaveProvider.cs
+@@ -0,0 +1,106 @@
++﻿using Concentus.Common;
++using NAudio.Wave;
++using System;
++
++namespace TonieFile
++{
++    /* converts the sample rate of 16 bit PCM audio using the Speex resampler from Concentus.
++       managed replacement for MediaFoundationResampler, which only exists on Windows. */
++    public class SpeexResamplingWaveProvider : IWaveProvider
++    {
++        private readonly IWaveProvider Source;
++        private readonly SpeexResampler Resampler;
++        private readonly int Channels;
++        private readonly byte[] SourceBuffer;
++        private readonly short[] InSamples;
++        private short[] OutSamples = new short[0];
++        private int InFrames = 0;
++        private int InPos = 0;
++        private int FlushFrames;
++        private bool SourceDone = false;
++
++        public WaveFormat WaveFormat { get; }
++
++        public SpeexResamplingWaveProvider(IWaveProvider source, int sampleRate, int quality)
++        {
++            if (source.WaveFormat.Encoding != WaveFormatEncoding.Pcm || source.WaveFormat.BitsPerSample != 16)
++            {
++                throw new ArgumentException("Resampler needs 16 bit PCM input");
++            }
++
++            Source = source;
++            Channels = source.WaveFormat.Channels;
++            WaveFormat = new WaveFormat(sampleRate, 16, Channels);
++            SourceBuffer = new byte[4096 * 2 * Channels];
++            InSamples = new short[4096 * Channels];
++
++            Resampler = SpeexResampler.Create(Channels, source.WaveFormat.SampleRate, sampleRate, quality);
++            /* skip the filter delay at the start and feed the same amount of silence at the end, so the output has the same length */
++            Resampler.SkipZeroes();
++            FlushFrames = Resampler.InputLatency;
++        }
++
++        public int Read(byte[] buffer, int offset, int count)
++        {
++            int outFrames = count / (2 * Channels);
++            int doneFrames = 0;
++
++            if (OutSamples.Length < outFrames * Channels)
++            {
++                OutSamples = new short[outFrames * Channels];
++            }
++
++            while (doneFrames < outFrames)
++            {
++                if (InPos >= InFrames && !Refill())
++                {
++                    break;
++                }
++
++                int inLen = InFrames - InPos;
++                int outLen = outFrames - doneFrames;
++                Resampler.ProcessInterleaved(InSamples, InPos * Channels, ref inLen, OutSamples, doneFrames * Channels, ref outLen);
++
++                if (inLen == 0 && outLen == 0)
++                {
++                    throw new InvalidOperationException("Resampler made no progress");
++                }
++                InPos += inLen;
++                doneFrames += outLen;
++            }
++
++            int bytes = doneFrames * Channels * 2;
++            Buffer.BlockCopy(OutSamples, 0, buffer, offset, bytes);
++
++            return bytes;
++        }
++
++        private bool Refill()
++        {
++            InPos = 0;
++            InFrames = 0;
++
++            if (!SourceDone)
++            {
++                InFrames = Source.Read(SourceBuffer, 0, SourceBuffer.Length) / (2 * Channels);
++
++                if (InFrames > 0)
++                {
++                    Buffer.BlockCopy(SourceBuffer, 0, InSamples, 0, InFrames * Channels * 2);
++                    return true;
++                }
++                SourceDone = true;
++            }
++
++            if (FlushFrames > 0)
++            {
++                InFrames = Math.Min(FlushFrames, InSamples.Length / Channels);
++                Array.Clear(InSamples, 0, InFrames * Channels);
++                FlushFrames -= InFrames;
++                return true;
++            }
++
++            return false;
++        }
++    }
++}
+diff --git a/TonieAudio/TonieAudio.cs b/TonieAudio/TonieAudio.cs
+index bc876c1..dc17078 100644
+--- a/TonieAudio/TonieAudio.cs
++++ b/TonieAudio/TonieAudio.cs
+@@ -34,6 +34,8 @@ using Concentus.Oggfile;
+ using Concentus.Structs;
+ using Id3;
+ using NAudio.Wave;
++using NAudio.Wave.SampleProviders;
++using NLayer.NAudioSupport;
+ using System;
+ using System.Collections.Generic;
+ using System.IO;
+@@ -317,48 +319,18 @@ namespace TonieFile
+         {
+             foreach (var source in sources)
+             {
+-                string item = source.Trim('"').Trim(Path.DirectorySeparatorChar);
++                /* only trim trailing separators, a leading one is the root of an absolute path on macOS/Linux */
++                string item = source.Trim('"').TrimEnd(Path.DirectorySeparatorChar);
+ 
+                 if (Directory.Exists(item))
+                 {
+-                    var filesInDir = Directory.GetFiles(item, "*.mp3").Concat(Directory.GetFiles(item, "*.ogg")).OrderBy(n => n).ToArray();
+-                    string[] sourceFiles = filesInDir;
+-                    bool failed = false;
+-
+-                    try
+-                    {
+-                        var fileTuples = filesInDir.Select(f => new Tuple<string, Id3Tag>(f, new Mp3(f, Mp3Permissions.Read).GetAllTags().FirstOrDefault()));
+-
+-                        sourceFiles = fileTuples.Where(t => t.Item2 != null).OrderBy(m => m.Item2.Track.Value).Select(t => t.Item1).ToArray();
+-
+-                        if (sourceFiles.Length < filesInDir.Length)
+-                        {
+-                            failed = true;
+-                            sourceFiles = filesInDir;
+-                        }
+-                    }
+-                    catch (Exception ex)
+-                    {
+-                        failed = true;
+-                    }
+-
+-                    if (failed)
+-                    {
+-                        Console.WriteLine("[INFO] Tried to sort using MP3 tag for track number, but not all files in");
+-                        Console.WriteLine("[INFO] this folder have valid ID3 tags. ");
+-                        Console.WriteLine("[INFO] Please make sure all files have correct ID3 fields to have them sorted correctly.");
+-                        Console.WriteLine("[INFO] ");
+-                        Console.WriteLine("[INFO] Sorting files by their filename.");
+-                        Console.WriteLine("");
+-                    }
+-
+-                    FileList.AddRange(sourceFiles);
++                    FileList.AddRange(SortTracks(Directory.GetFiles(item).Where(AudioInput.IsSupported)));
+                 }
+                 else if (File.Exists(item))
+                 {
+-                    if (!(item.ToLower().EndsWith(".mp3") || item.ToLower().EndsWith(".ogg")))
++                    if (!AudioInput.IsSupported(item))
+                     {
+-                        throw new InvalidDataException("Specified item '" + item + "' is no MP3/Ogg");
++                        throw new InvalidDataException("Specified item '" + item + "' is no supported audio file");
+                     }
+                     FileList.Add(item);
+                 }
+@@ -369,6 +341,32 @@ namespace TonieFile
+             }
+         }
+ 
++        /* by the track numbers of the MP3 tags if all files have one, else by name with numbers in natural order */
++        public static string[] SortTracks(IEnumerable<string> files)
++        {
++            string[] byName = files.OrderBy(f => NaturalKey(Path.GetFileName(f)), StringComparer.OrdinalIgnoreCase).ToArray();
++
++            try
++            {
++                var tracks = byName.Select(f => new { File = f, Track = AudioInput.Probe(f).Track }).ToArray();
++                if (tracks.Length > 1 && tracks.All(t => t.Track > 0))
++                {
++                    /* a stable sort, files with the same number keep their name order */
++                    return tracks.OrderBy(t => t.Track).Select(t => t.File).ToArray();
++                }
++            }
++            catch (Exception)
++            {
++            }
++            return byName;
++        }
++
++        /* "Track 2" sorts before "Track 10" */
++        private static string NaturalKey(string name)
++        {
++            return System.Text.RegularExpressions.Regex.Replace(name, @"\d+", m => m.Value.PadLeft(10, '0'));
++        }
++
+         public void ReadFile(string fileName, bool readAudio = true)
+         {
+             Filename = fileName;
+@@ -431,20 +429,17 @@ namespace TonieFile
+ 
+         private void GenerateAudio(List<string> sourceFiles, uint audioId, int bitRate, bool useVbr, string prefixLocation = null, EncodeCallback cbr = null)
+         {
+-            int channels = 2;
+-            int samplingRate = 48000;
+             List<uint> chapters = new List<uint>();
+ 
+-            var outFormat = new WaveFormat(samplingRate, 2);
+-
+-            if(cbr == null)
++            if (cbr == null)
+             {
+                 cbr = new EncodeCallback();
+             }
+ 
+-            OpusEncoder encoder = OpusEncoder.Create(48000, 2, OpusApplication.OPUS_APPLICATION_AUDIO);
+-            encoder.Bitrate = bitRate;
+-            encoder.UseVBR = useVbr;
++            if (bitRate < 24000 || bitRate > 192000)
++            {
++                throw new EncodingException("Please choose a bit rate between 24 and 192 kbps");
++            }
+ 
+             if (audioId == 0)
+             {
+@@ -452,208 +447,173 @@ namespace TonieFile
+             }
+ 
+             string tempName = Path.GetTempFileName();
++            long maxSize = 0x77359400;
+ 
+-            using (Stream outputData = new FileStream(tempName, FileMode.OpenOrCreate))
++            try
+             {
+-                byte[] buffer = new byte[2880 * channels * 2];
+-                OpusTags tags = new OpusTags();
+-                tags.Comment = "Lavf56.40.101";
+-                tags.Fields["encoder"] = "opusenc from opus-tools 0.1.9";
+-                tags.Fields["encoder_options"] = "--quiet --bitrate 96 --vbr";
+-                tags.Fields["pad"] = new string('0', 0x138);
+-
+-                OpusOggWriteStream oggOut = new OpusOggWriteStream(encoder, outputData, tags, samplingRate, (int)audioId);
+-
+-                uint lastIndex = 0;
+-                int track = 0;
+-                bool warned = false;
+-                long maxSize = 0x77359400;
+-
+-                foreach (var sourceFile in sourceFiles)
++                using (var encoder = OpusCodec.CreateEncoder(bitRate, useVbr))
++                using (Stream outputData = new FileStream(tempName, FileMode.Create))
+                 {
+-                    if ((outputData.Length + 0x1000) >= maxSize)
+-                    {
+-                        cbr.Warning("Close to 2 GiB, stopping");
+-                        break;
+-                    }
++                    var writer = new TonieOggWriter(outputData, encoder, (int)audioId);
++                    int track = 0;
++                    bool warned = false;
+ 
+-                    try
++                    foreach (var sourceFile in sourceFiles)
+                     {
+-                        int bytesReturned = 1;
+-                        int totalBytesRead = 0;
++                        if (writer.BytesWritten + 0x1000 >= maxSize)
++                        {
++                            cbr.Warning("Close to 2 GiB, stopping");
++                            break;
++                        }
+ 
+                         track++;
+-                        chapters.Add(lastIndex);
+-
+-                        int lastPct = 0;
++                        /* every chapter starts on its own page, so the box starts it exactly at its beginning */
++                        chapters.Add(track == 1 ? 0 : writer.StartChapter());
+                         cbr.FileStart(track, sourceFile);
+ 
+-
+-                        /* prepend a audio file for e.g. chapter number */
+-                        if (prefixLocation != null)
++                        try
+                         {
+-                            string prefixFile = Path.Combine(prefixLocation, track.ToString("0000") + ".mp3");
+-
+-                            if (!File.Exists(prefixFile))
++                            /* prepend a audio file for e.g. chapter number */
++                            if (prefixLocation != null)
+                             {
+-                                throw new FileNotFoundException("Missing prefix file '" + prefixFile + "'");
+-                            }
++                                string prefixFile = Path.Combine(prefixLocation, track.ToString("0000") + ".mp3");
+ 
+-                            try
+-                            {
+-                                var prefixStream = new Mp3FileReader(prefixFile);
+-                                var prefixResampled = new MediaFoundationResampler(prefixStream, outFormat);
++                                if (!File.Exists(prefixFile))
++                                {
++                                    throw new FileNotFoundException("Missing prefix file '" + prefixFile + "'");
++                                }
+ 
+-                                while (true)
++                                using (var prefix = AudioInput.Open(prefixFile))
+                                 {
+-                                    bytesReturned = prefixResampled.Read(buffer, 0, buffer.Length);
+-
+-                                    if (bytesReturned <= 0)
+-                                    {
+-                                        break;
+-                                    }
+-
+-                                    bool isEmpty = (buffer.Where(v => v != 0).Count() == 0);
+-                                    if (!isEmpty)
+-                                    {
+-                                        float[] sampleBuffer = ConvertToFloat(buffer, bytesReturned, channels);
+-
+-                                        if ((outputData.Length + 0x1000 + sampleBuffer.Length) >= maxSize)
+-                                        {
+-                                            break;
+-                                        }
+-                                        oggOut.WriteSamples(sampleBuffer, 0, sampleBuffer.Length);
+-                                    }
+-                                    lastIndex = (uint)oggOut.PageCounter;
++                                    EncodeSource(prefix, writer, maxSize, null);
+                                 }
+                             }
+-                            catch (Exception ex)
++
++                            using (var source = AudioInput.Open(sourceFile))
+                             {
+-                                throw new Exception("Failed processing prefix file '" + prefixFile + "'");
++                                EncodeSource(source, writer, maxSize, cbr);
+                             }
++                            cbr.FileDone();
+                         }
+-
+-                        /* then the real audio file */
+-                        string type = sourceFile.Split('.').Last().ToLower();
+-                        WaveStream stream = null;
+-
+-                        switch (type)
++                        catch (FileNotFoundException e)
+                         {
+-                            case "mp3":
+-                                stream = new Mp3FileReader(sourceFile);
+-                                break;
+-
+-                            case "ogg":
+-                                stream = new OpusWaveStream(File.Open(sourceFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite), bitRate, channels);
+-                                break;
++                            cbr.Failed(e.Message);
++                            throw new FileNotFoundException(e.Message);
+                         }
+-
+-                        if(stream == null)
++                        catch (Exception e)
+                         {
+-                            cbr.FileFailed("Unknown file type");
+-                            continue;
++                            string msg = "Failed processing " + sourceFile + " (" + e.Message + ")";
++                            cbr.Failed(msg);
++                            throw new EncodingException(msg);
+                         }
+ 
+-                        var streamResampled = new MediaFoundationResampler(stream, outFormat);
+-
+-                        while (true)
++                        if (!warned && writer.BytesWritten >= maxSize / 2)
+                         {
+-                            bytesReturned = streamResampled.Read(buffer, 0, buffer.Length);
+-
+-                            if (bytesReturned <= 0)
+-                            {
+-                                break;
+-                            }
+-                            totalBytesRead += bytesReturned;
+-
+-                            decimal progress = (decimal)stream.Position / stream.Length;
+-
+-                            if ((int)(progress * 20) != lastPct)
+-                            {
+-                                lastPct = (int)(progress * 20);
+-                                cbr.Progress(progress);
+-                            }
+-
+-                            bool isEmpty = (buffer.Where(v => v != 0).Count() == 0);
+-                            if (!isEmpty)
+-                            {
+-                                float[] sampleBuffer = ConvertToFloat(buffer, bytesReturned, channels);
+-
+-                                oggOut.WriteSamples(sampleBuffer, 0, sampleBuffer.Length);
+-                            }
+-                            lastIndex = (uint)oggOut.PageCounter;
++                            cbr.Warning("Approaching 2 GiB, please reduce the bitrate");
++                            warned = true;
+                         }
+-                        stream.Close();
+-
+-                        cbr.FileDone();
+-                    }
+-                    catch (OpusOggWriteStream.PaddingException e)
+-                    {
+-                        string msg = "Failed to pad opus data properly. Please try CBR with bitrates a multiple of 24 kbps";
+-                        cbr.Failed(msg);
+-                        throw new EncodingException(msg);
+-                    }
+-                    catch (FileNotFoundException e)
+-                    {
+-                        cbr.Failed(e.Message);
+-                        throw new FileNotFoundException(e.Message);
+-                    }
+-                    catch (InvalidDataException e)
+-                    {
+-                        string msg = "Failed processing " + sourceFile;
+-                        cbr.Failed(msg);
+-                        throw new Exception(msg);
+-                    }
+-                    catch (Exception e)
+-                    {
+-                        string msg = "Failed processing " + sourceFile;
+-                        cbr.Failed(msg);
+-                        throw new Exception(msg);
+                     }
+ 
+-                    if (!warned && outputData.Length >= maxSize / 2)
+-                    {
+-                        cbr.Warning("Approaching 2 GiB, please reduce the bitrate");
+-                        warned = true;
+-                    }
++                    writer.Finish();
++                    Header.AudioId = (uint)writer.StreamId;
+                 }
+ 
+-                oggOut.Finish();
+-                Header.AudioId = (uint) oggOut.LogicalStreamId;
++                Audio = File.ReadAllBytes(tempName);
++            }
++            finally
++            {
++                File.Delete(tempName);
+             }
+ 
+-            Audio = File.ReadAllBytes(tempName);
+-
+-            var prov = new SHA1CryptoServiceProvider();
+-            Header.Hash = prov.ComputeHash(Audio);
++            using (var sha = SHA1.Create())
++            {
++                Header.Hash = sha.ComputeHash(Audio);
++            }
+             Header.AudioChapters = chapters.ToArray();
+             Header.AudioLength = Audio.Length;
+             Header.Padding = new byte[0];
++        }
+ 
+-            File.Delete(tempName);
++        /* all of the source's audio, including silence (teddy used to drop silent blocks and pad tracks with up to 60 ms) */
++        private static void EncodeSource(AudioSource source, TonieOggWriter writer, long maxSize, EncodeCallback cbr)
++        {
++            byte[] buffer = new byte[4800 * 4];
++            float[] samples = new float[4800 * 2];
++            int lastPct = 0;
++
++            while (writer.BytesWritten + 0x1000 < maxSize)
++            {
++                int bytes = source.Pcm.Read(buffer, 0, buffer.Length);
++
++                if (bytes <= 0)
++                {
++                    break;
++                }
++
++                int count = bytes / 2;
++                for (int pos = 0; pos < count; pos++)
++                {
++                    samples[pos] = (short)(buffer[2 * pos] | buffer[2 * pos + 1] << 8) / 32768f;
++                }
++                writer.WriteSamples(samples, 0, count);
++
++                if (cbr != null && (int)(source.Progress * 20) != lastPct)
++                {
++                    lastPct = (int)(source.Progress * 20);
++                    cbr.Progress((decimal)source.Progress);
++                }
++            }
+         }
+ 
+-        private static float ShortToSample(short pcmValue)
++        /* the stream split into chapters, for playing, decoding and exporting them */
++        public TonieStream GetStream()
+         {
+-            return pcmValue / 32768f;
++            return new TonieStream(Audio, Header.AudioChapters);
+         }
+ 
+-        private float[] ConvertToFloat(byte[] pcmBuffer, int bytes, int channels)
++        /* reads only the header and the play time, without the audio: quick enough to list a whole SD card */
++        public static TonieAudio FromHeader(string file, out double seconds)
+         {
+-            int bytesPerSample = 2 * channels;
+-            float[] samples = new float[channels * (pcmBuffer.Length / bytesPerSample)];
++            TonieAudio audio = new TonieAudio();
++            audio.Filename = file;
++            seconds = 0;
+ 
+-            for (int sample = 0; sample < bytes / bytesPerSample; sample++)
++            using (var stream = File.Open(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+             {
+-                for (int chan = 0; chan < channels; chan++)
++                if (stream.Length < 0x2000)
+                 {
+-                    samples[channels * sample + chan] = ShortToSample((short)(pcmBuffer[bytesPerSample * sample + 1 + chan * 2] << 8 | pcmBuffer[bytesPerSample * sample + 0 + chan * 2]));
++                    throw new InvalidDataException("File too short for a tonie");
+                 }
+-            }
+ 
+-            return samples;
++                byte[] header = new byte[0x1000];
++                if (stream.Read(header, 0, header.Length) != header.Length)
++                {
++                    throw new InvalidDataException();
++                }
++                audio.FileContent = header;
++                audio.ParseBuffer();
++
++                /* the granule position of the last Ogg page is the play time */
++                int tailLength = (int)Math.Min(stream.Length - 0x1000, 0x2000);
++                byte[] tail = new byte[tailLength];
++                stream.Seek(-tailLength, SeekOrigin.End);
++                stream.Read(tail, 0, tailLength);
++                for (int pos = tailLength - 27; pos >= 0; pos--)
++                {
++                    if (tail[pos] == 'O' && tail[pos + 1] == 'g' && tail[pos + 2] == 'g' && tail[pos + 3] == 'S')
++                    {
++                        seconds = Math.Max(0, BitConverter.ToInt64(tail, pos + 6) - 356) / 48000.0;
++                        break;
++                    }
++                }
++                audio.FileSize = stream.Length;
++            }
++            return audio;
+         }
+ 
++        /* size of the file it was read from */
++        public long FileSize { get; private set; }
++
+         private void ParseBuffer()
+         {
+             int protoBufLength = (FileContent[0] << 24) | (FileContent[1] << 16) | (FileContent[2] << 8) | FileContent[3];
+@@ -843,86 +803,24 @@ namespace TonieFile
+ 
+         public void DumpAudioFiles(string outDirectory, string outFileName, bool singleOgg, string[] tags, string[] titles)
+         {
+-            int hdrOffset = 0;
+-            OggPage[] metaPages = GetOggHeaders(ref hdrOffset);
+-            AddTags(metaPages, tags);
++            var stream = GetStream();
+ 
+             if (singleOgg)
+             {
+-                string outFile = Path.Combine(outDirectory, outFileName);
+-
+-                File.WriteAllBytes(outFile + ".ogg", Audio);
+-                //File.WriteAllText(outFile + ".cue", BuildCueSheet(tonie), Encoding.UTF8);
++                File.WriteAllBytes(Path.Combine(outDirectory, outFileName) + ".ogg", stream.ExtractOgg(-1, tags));
++                return;
+             }
+-            else
++
++            /* standalone files with proper granule positions: players (and libopusfile) accept them */
++            foreach (var chapter in stream.Chapters)
+             {
+-                for (int chapter = 0; chapter < Header.AudioChapters.Length; chapter++)
++                var chapterTags = new List<string>(tags ?? new string[0]) { "TRACKNUMBER=" + (chapter.Index + 1) };
++                if (titles != null && chapter.Index < titles.Length)
+                 {
+-                    int trackNum = chapter + 1;
+-                    string fileName = Path.Combine(outDirectory, outFileName + " - Track #" + trackNum.ToString("00") + ".ogg");
+-                    FileStream outFile = File.Open(fileName, FileMode.Create, FileAccess.Write);
+-                    OggPage[] metaPagesTrack = metaPages.Select(p => new OggPage(p)).ToArray();
+-
+-                    if (titles != null && chapter < titles.Length)
+-                    {
+-                        string[] trackTags = new[] { "TITLE=" + titles[chapter] };
+-                        AddTags(metaPagesTrack, trackTags);
+-                    }
+-
+-                    foreach (OggPage page in metaPagesTrack)
+-                    {
+-                        page.Write(outFile);
+-                    }
+-
+-                    int offset = Math.Max(0, (int)(0x1000 * (Header.AudioChapters[chapter] - 2)));
+-                    int endOffset = int.MaxValue;
+-
+-                    if (chapter + 1 < Header.AudioChapters.Length)
+-                    {
+-                        endOffset = Math.Max(0, (int)(0x1000 * (Header.AudioChapters[chapter + 1] - 2)));
+-                    }
+-
+-                    bool done = false;
+-                    ulong granuleStart = ulong.MaxValue;
+-                    uint pageStart = uint.MaxValue;
+-                    while (!done)
+-                    {
+-                        OggPage page = GetOggPage(ref offset);
+-
+-                        if (page == null)
+-                        {
+-                            break;
+-                        }
+-
+-                        /* reached the end of this chapter? */
+-                        if (offset >= endOffset || offset >= Audio.Length)
+-                        {
+-                            /* set EOS flag */
+-                            page.Header.Type = 4;
+-                            done = true;
+-                        }
+-
+-                        /* do not write meta headers again. only applies to first chapter */
+-                        if (!IsMeta(page))
+-                        {
+-                            /* set granule position relative to chapter start */
+-                            if (granuleStart == ulong.MaxValue)
+-                            {
+-                                granuleStart = page.Header.GranulePosition;
+-                                pageStart = page.Header.PageSequenceNumber;
+-                            }
+-
+-                            page.Header.GranulePosition -= granuleStart;
+-                            page.Header.PageSequenceNumber -= pageStart;
+-                            page.Header.PageSequenceNumber += 2;
+-
+-
+-                            page.Write(outFile);
+-                        }
+-                    }
+-
+-                    outFile.Close();
++                    chapterTags.Add("TITLE=" + titles[chapter.Index]);
+                 }
++                string fileName = Path.Combine(outDirectory, outFileName + " - Track #" + (chapter.Index + 1).ToString("00") + ".ogg");
++                File.WriteAllBytes(fileName, stream.ExtractOgg(chapter.Index, chapterTags));
+             }
+         }
+ 
+diff --git a/TonieAudio/TonieAudio.csproj b/TonieAudio/TonieAudio.csproj
+index 9fae68b..e8e4f81 100644
+--- a/TonieAudio/TonieAudio.csproj
++++ b/TonieAudio/TonieAudio.csproj
+@@ -42,7 +42,13 @@
+     <PackageReference Include="Microsoft.CSharp" Version="4.7.0" />
+   </ItemGroup>
+   <ItemGroup>
+-    <PackageReference Include="NAudio" Version="2.0.1" />
++    <!-- only the NAudio parts in use, the NAudio meta package also pulls in NAudio.WinForms which breaks macOS/Linux builds -->
++    <PackageReference Include="NAudio.Core" Version="2.0.0" />
++    <PackageReference Include="NAudio.Wasapi" Version="2.0.0" />
++    <PackageReference Include="NAudio.WinMM" Version="2.0.1" />
+     <PackageReference Include="Newtonsoft.Json" Version="13.0.1" />
++    <PackageReference Include="NLayer" Version="1.16.0" />
++    <PackageReference Include="NLayer.NAudioSupport" Version="1.4.0" />
++    <PackageReference Include="NVorbis" Version="0.10.5" />
+   </ItemGroup>
+ </Project>
+\ No newline at end of file
+diff --git a/TonieAudio/TonieOggWriter.cs b/TonieAudio/TonieOggWriter.cs
+new file mode 100644
+index 0000000..edda479
+--- /dev/null
++++ b/TonieAudio/TonieOggWriter.cs
+@@ -0,0 +1,297 @@
++﻿using System;
++using System.Collections.Generic;
++using System.IO;
++using System.Text;
++
++namespace TonieFile
++{
++    /* Writes the Ogg Opus stream of a tonie file the way the Toniebox reads it:
++       - OpusHead and OpusTags take the first 0x200 bytes, the first audio page the rest of that 4 KiB block,
++         every further page is exactly 4 KiB, so no page crosses a 4 KiB block
++       - a full page is completed by padding its packets (Opus padding, which decoders skip) instead of
++         squeezing the next packet into the space that is left, which is audible
++       - every chapter starts on a new page, so skipping on the box lands exactly on the chapter start */
++    public class TonieOggWriter
++    {
++        private const int BlockSize = 0x1000;
++        private const int HeaderPagesSize = 0x200;
++        /* largest regular Opus packet (one 20 ms frame), padded packets stay within that */
++        private const int MaxPacketSize = 1275;
++        /* leave lacing values free on every page, padding a packet can need more of them */
++        private const int MaxLacingBeforePadding = 200;
++        /* OpusHead fields as in the original tonie files */
++        private const short PreSkip = 356;
++        private const int OriginalSampleRate = 44100;
++
++        private readonly Stream Output;
++        private readonly IOpusEncoder Encoder;
++        private readonly float[] Frame = new float[OpusCodec.FrameSize * OpusCodec.Channels];
++        private int FrameFill = 0;
++        private int ChapterFrames = 0;
++
++        /* packets of the page being filled, each buffer has room to be padded to MaxPacketSize */
++        private readonly List<byte[]> Packets = new List<byte[]>();
++        private readonly List<int> Sizes = new List<int>();
++
++        public int StreamId { get; }
++        public int PageSequence { get; private set; } = 0;
++        public long Granule { get; private set; } = 0;
++        public long BytesWritten { get; private set; } = 0;
++        public int PaddedBytes { get; private set; } = 0;
++        public int SilentFrames { get; private set; } = 0;
++
++        public TonieOggWriter(Stream output, IOpusEncoder encoder, int streamId)
++        {
++            Output = output;
++            Encoder = encoder;
++            StreamId = streamId;
++            WriteHeaderPages();
++        }
++
++        /* interleaved stereo samples, -1..1 */
++        public void WriteSamples(float[] samples, int offset, int count)
++        {
++            while (count > 0)
++            {
++                int take = Math.Min(count, Frame.Length - FrameFill);
++                Array.Copy(samples, offset, Frame, FrameFill, take);
++                FrameFill += take;
++                offset += take;
++                count -= take;
++
++                if (FrameFill == Frame.Length)
++                {
++                    EncodeFrame();
++                }
++            }
++        }
++
++        /* completes the last frame of a track with silence */
++        public void EndTrack()
++        {
++            if (FrameFill > 0 || ChapterFrames == 0)
++            {
++                Array.Clear(Frame, FrameFill, Frame.Length - FrameFill);
++                EncodeFrame();
++            }
++        }
++
++        /* starts the next chapter on a new page and returns the page number the tonie header refers to */
++        public uint StartChapter()
++        {
++            EndTrack();
++            if (Packets.Count > 0)
++            {
++                CompletePage(true);
++            }
++            ChapterFrames = 0;
++            return (uint)PageSequence;
++        }
++
++        public void Finish()
++        {
++            EndTrack();
++            /* the stream must not end at a 4 KiB boundary, see teddy's OpusOggWriteStream */
++            if (UsedBytes() == Capacity())
++            {
++                WritePage(0);
++                EncodeSilence();
++            }
++            WritePage(Ogg.FlagLast);
++            Output.Flush();
++        }
++
++        private void EncodeFrame()
++        {
++            byte[] packet = new byte[MaxPacketSize];
++            int size = Encoder.Encode(Frame, packet, MaxPacketSize);
++
++            FrameFill = 0;
++            ChapterFrames++;
++            if (!Fits(size))
++            {
++                CompletePage(false);
++            }
++            Packets.Add(packet);
++            Sizes.Add(size);
++            Granule += OpusCodec.FrameSize;
++        }
++
++        private void EncodeSilence()
++        {
++            Array.Clear(Frame, 0, Frame.Length);
++            FrameFill = Frame.Length;
++            EncodeFrame();
++            SilentFrames++;
++        }
++
++        /* bytes left in the current 4 KiB block */
++        private int Capacity()
++        {
++            return BlockSize - (int)(BytesWritten % BlockSize);
++        }
++
++        private int UsedBytes()
++        {
++            int used = Ogg.HeaderSize;
++            foreach (int size in Sizes)
++            {
++                used += Ogg.LacingCount(size) + size;
++            }
++            return used;
++        }
++
++        private int UsedLacing()
++        {
++            int lacing = 0;
++            foreach (int size in Sizes)
++            {
++                lacing += Ogg.LacingCount(size);
++            }
++            return lacing;
++        }
++
++        private bool Fits(int size)
++        {
++            return UsedBytes() + Ogg.LacingCount(size) + size <= Capacity() && UsedLacing() + Ogg.LacingCount(size) <= MaxLacingBeforePadding;
++        }
++
++        /* bytes a page grows by when a packet grows from one size to another */
++        private static int Growth(int from, int to)
++        {
++            return to + Ogg.LacingCount(to) - from - Ogg.LacingCount(from);
++        }
++
++        /* pads the packets of the current page so it exactly fills its 4 KiB block and writes it. at the end of
++           a chapter there may be more room than padding can take, then silent frames are added. */
++        private void CompletePage(bool chapterEnd)
++        {
++            while (true)
++            {
++                int free = Capacity() - UsedBytes();
++                int lacing = UsedLacing();
++
++                /* grow packets from the last one backwards, each as far as possible */
++                int[] grown = Sizes.ToArray();
++                for (int index = grown.Length - 1; index >= 0 && free > 0; index--)
++                {
++                    int size = grown[index];
++                    int target = size;
++                    while (target < MaxPacketSize && Growth(size, target + 1) <= free && lacing + Ogg.LacingCount(target + 1) - Ogg.LacingCount(size) <= 255)
++                    {
++                        target++;
++                    }
++                    free -= Growth(size, target);
++                    lacing += Ogg.LacingCount(target) - Ogg.LacingCount(size);
++                    grown[index] = target;
++                }
++
++                if (free == 0)
++                {
++                    for (int index = 0; index < grown.Length; index++)
++                    {
++                        if (!OpusCodec.Pad(Packets[index], Sizes[index], grown[index]))
++                        {
++                            throw new InvalidOperationException("Failed to pad an Opus packet from " + Sizes[index] + " to " + grown[index] + " bytes");
++                        }
++                        PaddedBytes += grown[index] - Sizes[index];
++                        Sizes[index] = grown[index];
++                    }
++                    WritePage(0);
++                    return;
++                }
++
++                if (!chapterEnd)
++                {
++                    throw new InvalidOperationException("Could not fill an Ogg page of the tonie file, " + free + " bytes left");
++                }
++
++                /* too much room left for padding alone: end the chapter with a silent frame */
++                int page = PageSequence;
++                EncodeSilence();
++                if (PageSequence != page)
++                {
++                    /* it did not fit and started the next page, the chapter begins there after 20 ms of silence */
++                    return;
++                }
++            }
++        }
++
++        private void WritePage(byte flags)
++        {
++            var segments = new List<ArraySegment<byte>>();
++            for (int index = 0; index < Packets.Count; index++)
++            {
++                segments.Add(new ArraySegment<byte>(Packets[index], 0, Sizes[index]));
++            }
++            byte[] page = Ogg.BuildPage(segments, flags, Granule, StreamId, PageSequence);
++
++            if (flags != Ogg.FlagLast && page.Length != Capacity())
++            {
++                throw new InvalidOperationException("Ogg page of " + page.Length + " bytes does not fill its 4 KiB block (" + Capacity() + " bytes)");
++            }
++
++            Output.Write(page, 0, page.Length);
++            BytesWritten += page.Length;
++            PageSequence++;
++            Packets.Clear();
++            Sizes.Clear();
++        }
++
++        private void WriteHeaderPages()
++        {
++            byte[] head = new byte[19];
++            Encoding.ASCII.GetBytes("OpusHead").CopyTo(head, 0);
++            head[8] = 1;
++            head[9] = (byte)OpusCodec.Channels;
++            Ogg.WriteLE(head, 10, (ushort)PreSkip, 2);
++            Ogg.WriteLE(head, 12, OriginalSampleRate, 4);
++            /* output gain and channel mapping family stay 0 */
++
++            byte[] headPage = Ogg.BuildPage(new[] { new ArraySegment<byte>(head) }, Ogg.FlagFirst, 0, StreamId, PageSequence++);
++            Output.Write(headPage, 0, headPage.Length);
++            BytesWritten += headPage.Length;
++
++            /* the same tags as teddy (and the original files) use, "pad" makes both pages exactly 0x200 bytes */
++            for (int pad = 0; pad < HeaderPagesSize; pad++)
++            {
++                byte[] tags = BuildTags(pad);
++                if (BytesWritten + Ogg.PageSize(new[] { new ArraySegment<byte>(tags) }) == HeaderPagesSize)
++                {
++                    byte[] tagsPage = Ogg.BuildPage(new[] { new ArraySegment<byte>(tags) }, 0, 0, StreamId, PageSequence++);
++                    Output.Write(tagsPage, 0, tagsPage.Length);
++                    BytesWritten += tagsPage.Length;
++                    return;
++                }
++            }
++            throw new InvalidOperationException("Could not size the OpusTags page");
++        }
++
++        private static byte[] BuildTags(int padLength)
++        {
++            var fields = new[]
++            {
++                "encoder=opusenc from opus-tools 0.1.9",
++                "encoder_options=--quiet --bitrate 96 --vbr",
++                "pad=" + new string('0', padLength)
++            };
++            var tags = new MemoryStream();
++            void Write(byte[] data) => tags.Write(data, 0, data.Length);
++            void WriteString(string value)
++            {
++                byte[] bytes = Encoding.UTF8.GetBytes(value);
++                Write(BitConverter.GetBytes(bytes.Length));
++                Write(bytes);
++            }
++
++            Write(Encoding.ASCII.GetBytes("OpusTags"));
++            WriteString("Lavf56.40.101");
++            Write(BitConverter.GetBytes(fields.Length));
++            foreach (string field in fields)
++            {
++                WriteString(field);
++            }
++            return tags.ToArray();
++        }
++    }
++}
+diff --git a/TonieAudio/TonieStream.cs b/TonieAudio/TonieStream.cs
+new file mode 100644
+index 0000000..7ebdfb5
+--- /dev/null
++++ b/TonieAudio/TonieStream.cs
+@@ -0,0 +1,415 @@
++﻿using System;
++using System.Collections.Generic;
++using System.IO;
++using System.Linq;
++using System.Text;
++
++namespace TonieFile
++{
++    /* the Ogg Opus stream of a tonie file, split into its chapters */
++    public class TonieStream
++    {
++        /* decoding a chapter from its first packet on sounds different from playing through: warm the decoder up first */
++        private const int PreRollSamples = 3840;
++
++        /* when a player asks for bytes in the middle of a chapter: long enough that the decoder output matches playing straight through */
++        private const int SeekPreRollSamples = 24000;
++
++        public class Chapter
++        {
++            public int Index;
++            /* first audio packet of the chapter and number of packets */
++            public int FirstPacket;
++            public int Packets;
++            public long Samples;
++            public double Seconds => Samples / 48000.0;
++        }
++
++        public readonly Ogg.Stream Ogg;
++        public readonly List<Chapter> Chapters = new List<Chapter>();
++        public readonly int PreSkip;
++        public readonly int Serial;
++        public long TotalSamples => Chapters.Sum(c => c.Samples);
++
++        /* chapterPages: the page numbers from the tonie header, the first chapter may be page 0 */
++        public TonieStream(byte[] audio, uint[] chapterPages)
++        {
++            Ogg = TonieFile.Ogg.Parse(audio, 0, audio.Length);
++            if (Ogg.Packets.Count < 3 || Ogg.Packets[0].Length < 19 || Encoding.ASCII.GetString(Ogg.Packets[0].Buffer, Ogg.Packets[0].Offset, 8) != "OpusHead")
++            {
++                throw new InvalidDataException("No Opus audio found");
++            }
++            var head = Ogg.Packets[0];
++            PreSkip = BitConverter.ToUInt16(head.Buffer, head.Offset + 10);
++            Serial = Ogg.Pages[0].Serial;
++
++            /* chapter starts as packet indexes, audio starts after OpusHead and OpusTags */
++            var starts = new List<int>();
++            foreach (uint pageNumber in (chapterPages == null || chapterPages.Length == 0) ? new uint[] { 0 } : chapterPages)
++            {
++                var page = Ogg.Pages.FirstOrDefault(p => p.Sequence >= pageNumber && p.FirstPacket >= 2);
++                int start = page == null ? Ogg.Packets.Count : Math.Max(2, page.FirstPacket);
++                if (starts.Count == 0)
++                {
++                    start = 2;
++                }
++                starts.Add(Math.Max(start, starts.LastOrDefault()));
++            }
++
++            for (int index = 0; index < starts.Count; index++)
++            {
++                int end = index + 1 < starts.Count ? starts[index + 1] : Ogg.Packets.Count;
++                var chapter = new Chapter { Index = index, FirstPacket = starts[index], Packets = end - starts[index] };
++                for (int packet = chapter.FirstPacket; packet < end; packet++)
++                {
++                    chapter.Samples += PacketSamples(Ogg.Packets[packet]);
++                }
++                if (index == 0)
++                {
++                    chapter.Samples = Math.Max(0, chapter.Samples - PreSkip);
++                }
++                Chapters.Add(chapter);
++            }
++        }
++
++        /* samples (48 kHz) in an Opus packet, from its TOC byte (RFC 6716, 3.1) */
++        public static int PacketSamples(TonieFile.Ogg.Packet packet)
++        {
++            if (packet.Length < 1)
++            {
++                return 0;
++            }
++            byte toc = packet.Buffer[packet.Offset];
++            int config = toc >> 3;
++            int frame;
++            if (config < 12)
++            {
++                frame = new[] { 480, 960, 1920, 2880 }[config & 3];
++            }
++            else if (config < 16)
++            {
++                frame = (config & 1) != 0 ? 960 : 480;
++            }
++            else
++            {
++                frame = 120 << (config & 3);
++            }
++            int frames;
++            switch (toc & 3)
++            {
++                case 0:
++                    frames = 1;
++                    break;
++                case 3:
++                    frames = packet.Length > 1 ? packet.Buffer[packet.Offset + 1] & 0x3F : 0;
++                    break;
++                default:
++                    frames = 2;
++                    break;
++            }
++            return frame * frames;
++        }
++
++        /* packets to decode ahead of a chapter (and drop) so it starts sounding like during normal playback */
++        private int PreRollStart(Chapter chapter)
++        {
++            int first = chapter.FirstPacket;
++            int samples = 0;
++            while (chapter.Index > 0 && first > 2 && samples < PreRollSamples)
++            {
++                first--;
++                samples += PacketSamples(Ogg.Packets[first]);
++            }
++            return first;
++        }
++
++        /* a standalone Ogg Opus file of one chapter, or of all of them for chapter -1 */
++        public byte[] ExtractOgg(int chapterIndex, IEnumerable<string> tags)
++        {
++            int first, count;
++            int preSkip;
++            if (chapterIndex < 0)
++            {
++                first = 2;
++                count = Ogg.Packets.Count - 2;
++                preSkip = PreSkip;
++            }
++            else
++            {
++                var chapter = Chapters[chapterIndex];
++                first = PreRollStart(chapter);
++                count = chapter.FirstPacket + chapter.Packets - first;
++                preSkip = chapterIndex == 0 ? PreSkip : 0;
++                for (int packet = first; packet < chapter.FirstPacket; packet++)
++                {
++                    preSkip += PacketSamples(Ogg.Packets[packet]);
++                }
++            }
++
++            var output = new MemoryStream();
++            int sequence = 0;
++
++            byte[] head = new byte[19];
++            Array.Copy(Ogg.Packets[0].Buffer, Ogg.Packets[0].Offset, head, 0, 19);
++            TonieFile.Ogg.WriteLE(head, 10, (ushort)Math.Min(preSkip, 65535), 2);
++            WritePage(output, new List<ArraySegment<byte>> { new ArraySegment<byte>(head) }, TonieFile.Ogg.FlagFirst, 0, ref sequence);
++            WritePage(output, new List<ArraySegment<byte>> { new ArraySegment<byte>(BuildTags(tags)) }, 0, 0, ref sequence);
++
++            var page = new List<ArraySegment<byte>>();
++            long granule = 0;
++            for (int index = first; index < first + count; index++)
++            {
++                var packet = Ogg.Packets[index];
++                var segment = new ArraySegment<byte>(packet.Buffer, packet.Offset, packet.Length);
++                page.Add(segment);
++                if (TonieFile.Ogg.PageSize(page) > 4096 || page.Sum(p => TonieFile.Ogg.LacingCount(p.Count)) > 255)
++                {
++                    page.RemoveAt(page.Count - 1);
++                    WritePage(output, page, 0, granule, ref sequence);
++                    page = new List<ArraySegment<byte>> { segment };
++                }
++                granule += PacketSamples(packet);
++            }
++            WritePage(output, page, TonieFile.Ogg.FlagLast, granule, ref sequence);
++            return output.ToArray();
++        }
++
++        private void WritePage(Stream output, List<ArraySegment<byte>> packets, byte flags, long granule, ref int sequence)
++        {
++            byte[] page = TonieFile.Ogg.BuildPage(packets, flags, granule, Serial, sequence++);
++            output.Write(page, 0, page.Length);
++        }
++
++        private static byte[] BuildTags(IEnumerable<string> tags)
++        {
++            var fields = (tags ?? Enumerable.Empty<string>()).Where(t => !string.IsNullOrEmpty(t) && t.Contains("=")).ToList();
++            var output = new MemoryStream();
++            void Write(byte[] data) => output.Write(data, 0, data.Length);
++            void WriteString(string value)
++            {
++                byte[] bytes = Encoding.UTF8.GetBytes(value);
++                Write(BitConverter.GetBytes(bytes.Length));
++                Write(bytes);
++            }
++            Write(Encoding.ASCII.GetBytes("OpusTags"));
++            WriteString("teddy");
++            Write(BitConverter.GetBytes(fields.Count));
++            foreach (string field in fields)
++            {
++                WriteString(field);
++            }
++            return output.ToArray();
++        }
++
++        /* decodes a chapter (or everything for -1) into a 16 bit, 48 kHz stereo WAV file */
++        public void DecodeWav(int chapterIndex, Stream output)
++        {
++            int first, count, skip;
++            long samples;
++            if (chapterIndex < 0)
++            {
++                first = 2;
++                count = Ogg.Packets.Count - 2;
++                skip = PreSkip;
++                samples = TotalSamples;
++            }
++            else
++            {
++                var chapter = Chapters[chapterIndex];
++                first = PreRollStart(chapter);
++                count = chapter.FirstPacket + chapter.Packets - first;
++                skip = chapterIndex == 0 ? PreSkip : 0;
++                for (int packet = first; packet < chapter.FirstPacket; packet++)
++                {
++                    skip += PacketSamples(Ogg.Packets[packet]);
++                }
++                samples = chapter.Samples;
++            }
++
++            WriteWavHeader(output, samples);
++            long remaining = samples;
++            var pcm = new float[5760 * 2];
++            var bytes = new byte[5760 * 4];
++            using (var decoder = OpusCodec.CreateDecoder())
++            {
++                for (int index = first; index < first + count && remaining > 0; index++)
++                {
++                    var packet = Ogg.Packets[index];
++                    int decoded = decoder.Decode(packet.Buffer, packet.Offset, packet.Length, pcm);
++                    int start = Math.Min(skip, decoded);
++                    skip -= start;
++                    int take = (int)Math.Min(decoded - start, remaining);
++                    for (int pos = 0; pos < take * 2; pos++)
++                    {
++                        short value = (short)Math.Max(short.MinValue, Math.Min(short.MaxValue, Math.Round(pcm[start * 2 + pos] * 32767)));
++                        bytes[2 * pos] = (byte)value;
++                        bytes[2 * pos + 1] = (byte)(value >> 8);
++                    }
++                    output.Write(bytes, 0, take * 4);
++                    remaining -= take;
++                }
++            }
++            /* keep the length promised in the header */
++            Array.Clear(bytes, 0, bytes.Length);
++            while (remaining > 0)
++            {
++                int take = (int)Math.Min(remaining, bytes.Length / 4);
++                output.Write(bytes, 0, take * 4);
++                remaining -= take;
++            }
++        }
++
++        private long[] packetStarts;
++
++        /* where each packet starts, in decoded samples counted from the first audio packet */
++        private long[] PacketStarts()
++        {
++            if (packetStarts == null)
++            {
++                var starts = new long[Ogg.Packets.Count + 1];
++                long position = 0;
++                for (int index = 2; index < Ogg.Packets.Count; index++)
++                {
++                    starts[index] = position;
++                    position += PacketSamples(Ogg.Packets[index]);
++                }
++                starts[Ogg.Packets.Count] = position;
++                packetStarts = starts;
++            }
++            return packetStarts;
++        }
++
++        /* length of the WAV file DecodeWav writes for a chapter */
++        public long WavLength(int chapterIndex) => 44 + Chapters[chapterIndex].Samples * 4;
++
++        /* bytes [from, from + count) of the WAV file DecodeWav writes for a chapter, decoded on the fly:
++           a player can start or jump anywhere without the whole (possibly huge) file being made first */
++        public IEnumerable<ArraySegment<byte>> WavRange(int chapterIndex, long from, long count)
++        {
++            var chapter = Chapters[chapterIndex];
++            var header = new MemoryStream();
++            WriteWavHeader(header, chapter.Samples);
++            byte[] head = header.ToArray();
++            long end = Math.Min(from + count, WavLength(chapterIndex));
++            if (from < head.Length && from < end)
++            {
++                int take = (int)Math.Min(head.Length - from, end - from);
++                yield return new ArraySegment<byte>(head, (int)from, take);
++                from += take;
++            }
++            if (from >= end)
++            {
++                yield break;
++            }
++
++            long dataOffset = from - head.Length;
++            int skipBytes = (int)(dataOffset % 4);
++            long remaining = end - from;
++            var starts = PacketStarts();
++            int last = chapter.FirstPacket + chapter.Packets;
++            long target = (chapterIndex == 0 ? PreSkip : starts[chapter.FirstPacket]) + dataOffset / 4;
++
++            /* the packet holding the first wanted sample, and some packets before it to warm the decoder up */
++            int packet = chapter.FirstPacket;
++            int low = chapter.FirstPacket, high = last - 1;
++            while (low <= high)
++            {
++                int middle = (low + high) / 2;
++                if (starts[middle] <= target)
++                {
++                    packet = middle;
++                    low = middle + 1;
++                }
++                else
++                {
++                    high = middle - 1;
++                }
++            }
++            int first = packet;
++            while (first > 2 && target - starts[first] < SeekPreRollSamples)
++            {
++                first--;
++            }
++            long discard = target - starts[first];
++
++            var pcm = new float[5760 * 2];
++            var bytes = new byte[5760 * 4];
++            using (var decoder = OpusCodec.CreateDecoder())
++            {
++                for (int index = first; index < last && remaining > 0; index++)
++                {
++                    int decoded = DecodeOrSilence(decoder, Ogg.Packets[index], pcm);
++                    int start = (int)Math.Min(discard, decoded);
++                    discard -= start;
++                    int samples = decoded - start;
++                    if (samples <= 0)
++                    {
++                        continue;
++                    }
++                    ToPcm16(pcm, start, samples, bytes);
++                    int take = (int)Math.Min(samples * 4 - skipBytes, remaining);
++                    yield return new ArraySegment<byte>(bytes, skipBytes, take);
++                    skipBytes = 0;
++                    remaining -= take;
++                }
++            }
++            /* keep the length promised in the header */
++            Array.Clear(bytes, 0, bytes.Length);
++            while (remaining > 0)
++            {
++                int take = (int)Math.Min(remaining, bytes.Length);
++                yield return new ArraySegment<byte>(bytes, 0, take);
++                remaining -= take;
++            }
++        }
++
++        /* a damaged packet plays as silence instead of stopping everything */
++        private static int DecodeOrSilence(IOpusDecoder decoder, TonieFile.Ogg.Packet packet, float[] pcm)
++        {
++            try
++            {
++                int decoded = decoder.Decode(packet.Buffer, packet.Offset, packet.Length, pcm);
++                if (decoded >= 0)
++                {
++                    return decoded;
++                }
++            }
++            catch (Exception)
++            {
++            }
++            int samples = Math.Min(PacketSamples(packet), pcm.Length / 2);
++            Array.Clear(pcm, 0, samples * 2);
++            return samples;
++        }
++
++        private static void ToPcm16(float[] pcm, int start, int samples, byte[] bytes)
++        {
++            for (int pos = 0; pos < samples * 2; pos++)
++            {
++                short value = (short)Math.Max(short.MinValue, Math.Min(short.MaxValue, Math.Round(pcm[start * 2 + pos] * 32767)));
++                bytes[2 * pos] = (byte)value;
++                bytes[2 * pos + 1] = (byte)(value >> 8);
++            }
++        }
++
++        public static void WriteWavHeader(Stream output, long samples)
++        {
++            long dataBytes = samples * 4;
++            var header = new MemoryStream();
++            void Write(byte[] data) => header.Write(data, 0, data.Length);
++            Write(Encoding.ASCII.GetBytes("RIFF"));
++            Write(BitConverter.GetBytes((uint)Math.Min(uint.MaxValue, 36 + dataBytes)));
++            Write(Encoding.ASCII.GetBytes("WAVEfmt "));
++            Write(BitConverter.GetBytes(16));
++            Write(BitConverter.GetBytes((short)1));
++            Write(BitConverter.GetBytes((short)2));
++            Write(BitConverter.GetBytes(48000));
++            Write(BitConverter.GetBytes(48000 * 4));
++            Write(BitConverter.GetBytes((short)4));
++            Write(BitConverter.GetBytes((short)16));
++            Write(Encoding.ASCII.GetBytes("data"));
++            Write(BitConverter.GetBytes((uint)Math.Min(uint.MaxValue, dataBytes)));
++            header.WriteTo(output);
++        }
++    }
++}
+diff --git a/TonieAudio/TonieTools.cs b/TonieAudio/TonieTools.cs
+index 2926cdb..022d57e 100644
+--- a/TonieAudio/TonieTools.cs
++++ b/TonieAudio/TonieTools.cs
+@@ -79,7 +79,8 @@ namespace TonieFile
+             public string Pic;
+         }
+ 
+-        public static bool DumpInfo(StringBuilder message, eDumpFormat dumpFormat, string file, TonieData[] tonieInfos, string customName = null)
++        /* first: the first entry of a JSON list, the ones after it start with a comma */
++        public static bool DumpInfo(StringBuilder message, eDumpFormat dumpFormat, string file, TonieData[] tonieInfos, string customName = null, bool first = true)
+         {
+             try
+             {
+@@ -99,7 +100,6 @@ namespace TonieFile
+                     id += 0x50000000;
+                 }
+                 var date = DateTimeOffset.FromUnixTimeSeconds(id);
+-                bool first = false;
+ 
+                 switch (dumpFormat)
+                 {
+@@ -173,6 +173,15 @@ namespace TonieFile
+                             }
+ 
+                             TimeSpan prevTime = new TimeSpan();
++                            /* exact chapter lengths from the audio packets; the page granules below only estimate them */
++                            TonieStream stream = null;
++                            try
++                            {
++                                stream = dumpFile.GetStream();
++                            }
++                            catch (Exception)
++                            {
++                            }
+                             for (int track = 1; track <= dumpFile.Header.AudioChapters.Length; track++)
+                             {
+                                 uint off = dumpFile.GetHighestPage();
+@@ -184,7 +193,11 @@ namespace TonieFile
+                                 ulong granule = dumpFile.GetGranuleByPage(off);
+                                 string lengthString = "@" + off;
+ 
+-                                if (granule != ulong.MaxValue)
++                                if (stream != null && track <= stream.Chapters.Count)
++                                {
++                                    lengthString = TimeSpan.FromSeconds(stream.Chapters[track - 1].Seconds).ToString(@"hh\:mm\:ss\.ff");
++                                }
++                                else if (granule != ulong.MaxValue)
+                                 {
+                                     TimeSpan trackOffset = TimeSpan.FromSeconds(granule / 48000.0f);
+                                     lengthString = (trackOffset - prevTime).ToString(@"hh\:mm\:ss\.ff");

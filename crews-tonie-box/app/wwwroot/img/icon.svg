@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- Crew's Tonie Box app icon: Teddy peeking over a cloud under the night sky -->
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0.35" y2="1">
+      <stop offset="0" stop-color="#140f3c"/>
+      <stop offset="0.55" stop-color="#2a1f7a"/>
+      <stop offset="1" stop-color="#5634b8"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#ffc94d" stop-opacity="0.55"/>
+      <stop offset="0.6" stop-color="#ff9ccb" stop-opacity="0.18"/>
+      <stop offset="1" stop-color="#7c5cff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="cloud" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#e6ddff"/>
+    </linearGradient>
+    <linearGradient id="moon" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffe7a1"/>
+      <stop offset="1" stop-color="#ffb52e"/>
+    </linearGradient>
+    <clipPath id="body">
+      <rect x="100" y="100" width="824" height="824" rx="186"/>
+    </clipPath>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="125%">
+      <feDropShadow dx="0" dy="12" stdDeviation="14" flood-color="#0b0726" flood-opacity="0.35"/>
+    </filter>
+    <symbol id="star" viewBox="0 0 24 24">
+      <path d="m12 1.5 2.9 6.9 7.4.6-5.6 4.9 1.7 7.3L12 17.3 5.6 21.2l1.7-7.3L1.7 9l7.4-.6z"/>
+    </symbol>
+  </defs>
+
+  <g filter="url(#shadow)">
+    <rect x="100" y="100" width="824" height="824" rx="186" fill="url(#sky)"/>
+  </g>
+
+  <g clip-path="url(#body)">
+    <!-- stars and moon -->
+    <g fill="#fff6d6">
+      <use href="#star" x="190" y="190" width="46" height="46"/>
+      <use href="#star" x="318" y="150" width="24" height="24" opacity="0.8"/>
+      <use href="#star" x="160" y="352" width="28" height="28" opacity="0.75"/>
+      <use href="#star" x="560" y="176" width="22" height="22" opacity="0.7"/>
+      <use href="#star" x="838" y="428" width="30" height="30" opacity="0.85"/>
+    </g>
+    <use href="#star" x="244" y="268" width="20" height="20" fill="#ffc94d"/>
+    <use href="#star" x="798" y="330" width="18" height="18" fill="#ffc94d"/>
+    <path d="M806 168a112 112 0 1 0 64 190 128 128 0 0 1-64-190z" fill="url(#moon)" transform="matrix(0.84 0 0 0.84 150 16)"/>
+
+    <!-- soft glow behind Teddy -->
+    <circle cx="512" cy="548" r="330" fill="url(#glow)"/>
+
+    <!-- Teddy (same bear as in the app, scaled up) -->
+    <g transform="translate(236 222) scale(4.6)">
+      <circle cx="30" cy="30" r="16" fill="#c98556"/><circle cx="30" cy="30" r="8.5" fill="#f2c7a5"/>
+      <circle cx="90" cy="30" r="16" fill="#c98556"/><circle cx="90" cy="30" r="8.5" fill="#f2c7a5"/>
+      <circle cx="60" cy="63" r="41" fill="#d99a66"/>
+      <ellipse cx="60" cy="78" rx="19" ry="15" fill="#f5d3b3"/>
+      <circle cx="45" cy="57" r="5.2" fill="#3b2640"/><circle cx="46.8" cy="55.2" r="1.8" fill="#fff"/>
+      <circle cx="75" cy="57" r="5.2" fill="#3b2640"/><circle cx="76.8" cy="55.2" r="1.8" fill="#fff"/>
+      <ellipse cx="60" cy="71" rx="6.5" ry="4.8" fill="#3b2640"/>
+      <path d="M52 80q8 7 16 0" stroke="#3b2640" stroke-width="3" fill="none" stroke-linecap="round"/>
+      <ellipse cx="37" cy="72" rx="6.5" ry="3.8" fill="#ff8fb1" opacity=".65"/><ellipse cx="83" cy="72" rx="6.5" ry="3.8" fill="#ff8fb1" opacity=".65"/>
+    </g>
+
+    <!-- the cloud Teddy peeks over -->
+    <path d="M60 1000V802c30-46 96-62 146-34 24-58 104-80 156-40 34-62 136-72 186-18 44-44 130-40 166 16 54-26 126-4 146 52 40-10 84 10 104 44V1000z" fill="url(#cloud)"/>
+    <path d="M150 842c30-10 60-8 84 6M478 790c30-12 64-10 90 6" stroke="#cfc2ff" stroke-width="10" fill="none" stroke-linecap="round" opacity="0.7"/>
+
+    <!-- two little notes floating up -->
+    <g fill="#ff6fae">
+      <path d="M770 610v-96l62-14v84" stroke="#ff6fae" stroke-width="14" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+      <ellipse cx="752" cy="614" rx="24" ry="19" transform="rotate(-18 752 614)"/>
+      <ellipse cx="814" cy="590" rx="24" ry="19" transform="rotate(-18 814 590)"/>
+    </g>
+    <g fill="#ffc94d">
+      <path d="M232 566v-84" stroke="#ffc94d" stroke-width="13" fill="none" stroke-linecap="round"/>
+      <path d="M232 482q30 8 34 40" stroke="#ffc94d" stroke-width="13" fill="none" stroke-linecap="round"/>
+      <ellipse cx="214" cy="568" rx="23" ry="18" transform="rotate(-18 214 568)"/>
+    </g>
+  </g>
+</svg>

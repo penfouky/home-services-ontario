@@ -1,0 +1,11 @@
+[Unit]
+Description=Crew's Tonie Cloud encrypted backup
+Wants=network-online.target docker.service
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+# adjust this path to where you put the ops/ folder on the VPS
+WorkingDirectory=/opt/crews-tonie-cloud/ops
+ExecStart=/opt/crews-tonie-cloud/ops/ctc-backup.sh
+Nice=10

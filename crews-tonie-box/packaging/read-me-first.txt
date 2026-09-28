@@ -1,0 +1,50 @@
+Crew's Tonie Box
+================
+
+Listen to the tonies on your Toniebox SD card, put your own stories, songs and
+recordings on them, and keep copies of everything on your Mac.
+
+Needs a Mac with Apple Silicon (M1 or newer) and macOS 12 Monterey or newer.
+
+
+Opening it the first time
+-------------------------
+1. Drag "Crew's Tonie Box" into your Applications folder.
+2. Double-click it. Your Mac says it cannot check the app for malicious software.
+   That is because the app is not from the App Store and not registered with Apple.
+   It only has to be allowed once:
+
+   macOS 15 Sequoia and newer:
+     Click "Done". Open System Settings > Privacy & Security and scroll down to
+     the note that "Crew's Tonie Box" was blocked. Click "Open Anyway" and confirm.
+
+   macOS 12 to 14:
+     Right-click (or Control-click) the app, choose "Open", then click "Open".
+
+   Or, in Terminal:  xattr -dr com.apple.quarantine "/Applications/Crew's Tonie Box.app"
+
+
+Using it
+--------
+- Put the Toniebox's SD card into your Mac. Its tonies show up by themselves, with
+  names and pictures for the official ones.
+- Click a tonie to listen to its chapters, keep a copy, save the chapters as songs,
+  or put new stories on it.
+- "Make a new tonie" walks you through it: pick the tonie (tag), add sounds
+  (MP3, M4A, voice memos, WAV, AIFF, FLAC, Ogg, whole folders) or record your voice,
+  give it a name and a picture, and let the magic happen.
+- Before anything on the card is replaced or removed, a copy goes to "My shelf".
+  Copies live in ~/Library/Application Support/Crew's Tonie Box/Backups.
+- When you are done, click "Eject", put the card back into the Toniebox, place the
+  tonie on top and listen.
+
+Good to know
+------------
+- A Toniebox that is online may download the original content of an official tonie
+  again. "Keep the tonie's audio ID" (on by default) helps it keep your stories.
+- Songs you save go to Music > Crew's Tonie Box.
+
+Crew's Tonie Box is built on teddy by the Toniebox reverse engineering community
+(https://github.com/toniebox-reverse-engineering). It is not made by or connected to
+tonies GmbH. Toniebox and tonies are their trademarks. Please only put audio on
+tonies that you are allowed to use.

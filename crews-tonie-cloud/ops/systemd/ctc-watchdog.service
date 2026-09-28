@@ -1,0 +1,9 @@
+[Unit]
+Description=Crew's Tonie Cloud health watchdog
+Wants=network-online.target
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/crews-tonie-cloud/ops
+ExecStart=/opt/crews-tonie-cloud/ops/ctc-watchdog.sh
