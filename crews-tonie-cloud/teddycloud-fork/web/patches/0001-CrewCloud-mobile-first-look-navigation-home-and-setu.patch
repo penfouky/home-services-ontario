@@ -1,0 +1,3203 @@
+From 175981457280c913fc9e3ab073bdb55918da7bf0 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Mon, 28 Sep 2026 17:32:16 +0000
+Subject: [PATCH 1/3] CrewCloud: mobile-first look, navigation, home and setup
+ guide
+
+- Own theme (pink-purple brand, Nunito/Fredoka fonts), 16px type and 44px touch targets on phones; dark mode follows the brand.
+- Phones get a bottom tab bar (Home, Tonies, Add audio, Boxes, More), a compact section bar with a Pages sheet instead of nested drawers, and notifications above the tab bar. Header: logo + CrewCloud, status dot, bell.
+- Home is task-first: setup progress card, one big Add audio button, shortcut tiles, your tonies and boxes, help links.
+- New /setup guide: 5 steps worked out from real server state (box connected, tonie seen, audio in the library, tonie playing it), with the box-registration switch and recommended settings in place.
+- Tonies list shows two per row on phones.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01VdeEDs6BS9YupCSmfGg7F8
+---
+ package-lock.json                             |  43 +-
+ package.json                                  |   2 +
+ src/App.tsx                                   |  43 +-
+ src/assets/crewcloud-logo.svg                 |  30 +
+ src/components/common/StyledComponents.tsx    |  98 ++-
+ .../common/buttons/NotificationButton.tsx     |  18 +-
+ src/components/common/footer/StyledFooter.tsx |  39 +-
+ src/components/common/header/ServerStatus.tsx |  95 ++-
+ src/components/common/header/StyledHeader.tsx | 304 ++++-----
+ src/components/common/icons/CrewIcons.tsx     |  47 ++
+ .../common/navigation/MobileTabBar.tsx        | 332 +++++++++
+ src/components/home/HomeSubNav.tsx            |  17 +
+ src/components/home/home/Home.tsx             | 632 +++++++++++++-----
+ src/components/setup/SetupGuide.tsx           | 373 +++++++++++
+ src/components/setup/useSetupStatus.ts        | 118 ++++
+ .../tonies/tonieslist/ToniesList.tsx          |  12 +-
+ src/crewcloud/brand.ts                        |  34 +
+ src/crewcloud/crewcloud.css                   | 127 ++++
+ src/crewcloud/theme.ts                        |  86 +++
+ src/crewcloud/useIsMobile.ts                  |  25 +
+ src/index.tsx                                 |   3 +
+ src/pages/setup/SetupPage.tsx                 |  33 +
+ src/provider/TeddyCloudProvider.tsx           |  10 +-
+ 23 files changed, 2101 insertions(+), 420 deletions(-)
+ create mode 100644 src/assets/crewcloud-logo.svg
+ create mode 100644 src/components/common/icons/CrewIcons.tsx
+ create mode 100644 src/components/common/navigation/MobileTabBar.tsx
+ create mode 100644 src/components/setup/SetupGuide.tsx
+ create mode 100644 src/components/setup/useSetupStatus.ts
+ create mode 100644 src/crewcloud/brand.ts
+ create mode 100644 src/crewcloud/crewcloud.css
+ create mode 100644 src/crewcloud/theme.ts
+ create mode 100644 src/crewcloud/useIsMobile.ts
+ create mode 100644 src/pages/setup/SetupPage.tsx
+
+diff --git a/package-lock.json b/package-lock.json
+index 96050d0..0575abc 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -11,6 +11,8 @@
+                 "@ant-design/icons": "^6.3.2",
+                 "@dnd-kit/core": "^6.3.1",
+                 "@dnd-kit/sortable": "^10.0.0",
++                "@fontsource-variable/fredoka": "^5.3.0",
++                "@fontsource-variable/nunito": "^5.3.0",
+                 "@remix-run/router": "^1.23.4",
+                 "@types/jest": "^30.0.0",
+                 "@types/node": "^26.2.0",
+@@ -159,6 +161,7 @@
+             "integrity": "sha512-DOjnob/cXOUgDOozCDeq/aK2p5y8dUIVdf6tNhEV1HQRd6I8aQ4f4fbtHRVEvb6lP3BGomrKHiS8ICAASSVQSw==",
+             "dev": true,
+             "license": "MIT",
++            "peer": true,
+             "engines": {
+                 "node": "^22.18.0 || >=24.11.0"
+             }
+@@ -233,6 +236,7 @@
+             "integrity": "sha512-JwculLABZvyPvyLBpwU/E/IbH2uM3mnxNtIJpxnIfb24y1PrdVxK5Dqjle4DpgqpGRnwgC7G8IkzPdSXZrO1Ew==",
+             "dev": true,
+             "license": "MIT",
++            "peer": true,
+             "dependencies": {
+                 "@babel/compat-data": "^8.0.0",
+                 "@babel/helper-validator-option": "^8.0.0",
+@@ -510,6 +514,7 @@
+             "integrity": "sha512-U4Dybxh4WESWHt5XhBeExi4DrY0/DNK1aHpQbsrQXCUbFHuMweT0TpLEWKvaraV2Y6fS+ZXunsZ8zIuZIgvF2Q==",
+             "dev": true,
+             "license": "MIT",
++            "peer": true,
+             "engines": {
+                 "node": "^22.18.0 || >=24.11.0"
+             }
+@@ -520,6 +525,7 @@
+             "integrity": "sha512-wfbi91pM3py96oIiJEz7qIpyXDytgr9zQC1HEWwlGNVRAEmItuU/0a41ZUKu1sJGyhhOIpc4t5vk4PYzt8wpsg==",
+             "dev": true,
+             "license": "MIT",
++            "peer": true,
+             "dependencies": {
+                 "@babel/template": "^8.0.0",
+                 "@babel/types": "^8.0.0"
+@@ -636,7 +642,6 @@
+             "resolved": "https://registry.npmjs.org/@dnd-kit/core/-/core-6.3.1.tgz",
+             "integrity": "sha512-xkGBRQQab4RLwgXxoqETICr6S5JlogafbhNsidmrkVv2YRs5MLwpjoF2qpiGjQt8S9AoxtIV603s0GIUpY5eYQ==",
+             "license": "MIT",
+-            "peer": true,
+             "dependencies": {
+                 "@dnd-kit/accessibility": "^3.1.1",
+                 "@dnd-kit/utilities": "^3.2.2",
+@@ -707,6 +712,24 @@
+             "dev": true,
+             "license": "MIT"
+         },
++        "node_modules/@fontsource-variable/fredoka": {
++            "version": "5.3.0",
++            "resolved": "https://registry.npmjs.org/@fontsource-variable/fredoka/-/fredoka-5.3.0.tgz",
++            "integrity": "sha512-13w98iw2RcmYfZQRZPLSu+0YJK3HHm5A2XrpU26moFIAePmfiKfvkmEJUgkc8r5GNR+pbDijOueS1KdGAMAWmQ==",
++            "license": "OFL-1.1",
++            "funding": {
++                "url": "https://github.com/sponsors/ayuhito"
++            }
++        },
++        "node_modules/@fontsource-variable/nunito": {
++            "version": "5.3.0",
++            "resolved": "https://registry.npmjs.org/@fontsource-variable/nunito/-/nunito-5.3.0.tgz",
++            "integrity": "sha512-tw0ch7evIDSwoeUy+0XzocYHfbRWLeCRPJy22KgbrLjDLAbNw/fErBiil10Ssrs3Sjr55zaZrr36a975j8cBkQ==",
++            "license": "OFL-1.1",
++            "funding": {
++                "url": "https://github.com/sponsors/ayuhito"
++            }
++        },
+         "node_modules/@jest/diff-sequences": {
+             "version": "30.4.0",
+             "resolved": "https://registry.npmjs.org/@jest/diff-sequences/-/diff-sequences-30.4.0.tgz",
+@@ -1913,7 +1936,6 @@
+             "resolved": "https://registry.npmjs.org/@babel/core/-/core-7.29.7.tgz",
+             "integrity": "sha512-RgHBCvtjbOK2gXSNBNIkNoEc9qoVEtau3hj8gEqKQuL3HZAibKarWFEI3Lfm6EYKkLalOh8eSrj9b+ch9H/VBA==",
+             "license": "MIT",
+-            "peer": true,
+             "dependencies": {
+                 "@babel/code-frame": "^7.29.7",
+                 "@babel/generator": "^7.29.7",
+@@ -2373,7 +2395,6 @@
+             "resolved": "https://registry.npmjs.org/@babel/core/-/core-7.29.7.tgz",
+             "integrity": "sha512-RgHBCvtjbOK2gXSNBNIkNoEc9qoVEtau3hj8gEqKQuL3HZAibKarWFEI3Lfm6EYKkLalOh8eSrj9b+ch9H/VBA==",
+             "license": "MIT",
+-            "peer": true,
+             "dependencies": {
+                 "@babel/code-frame": "^7.29.7",
+                 "@babel/generator": "^7.29.7",
+@@ -2764,7 +2785,8 @@
+             "resolved": "https://registry.npmjs.org/@types/gensync/-/gensync-1.0.5.tgz",
+             "integrity": "sha512-MbsRCT7mTikHwKZ0X+LVUTLRrZZRLipTuXEO9qOYO+zmjMVk81axyClMROf6uoPD9MRVu46bx8zoR0Ad9q3NAg==",
+             "dev": true,
+-            "license": "MIT"
++            "license": "MIT",
++            "peer": true
+         },
+         "node_modules/@types/hast": {
+             "version": "3.0.5",
+@@ -2870,7 +2892,6 @@
+             "resolved": "https://registry.npmjs.org/@types/react/-/react-19.2.18.tgz",
+             "integrity": "sha512-AnzbBERsrLKtk2XSfTbYRLjQPdy116Sty4q+T+Bp3IC4l6jNBvreVPAHmpq9qhXQM7CXZPjLVmGMw9sy+hxQ3w==",
+             "license": "MIT",
+-            "peer": true,
+             "dependencies": {
+                 "csstype": "^3.2.2"
+             }
+@@ -3414,7 +3435,6 @@
+                 }
+             ],
+             "license": "MIT",
+-            "peer": true,
+             "dependencies": {
+                 "baseline-browser-mapping": "^2.11.12",
+                 "caniuse-lite": "^1.0.30001809",
+@@ -3754,8 +3774,7 @@
+             "version": "1.11.23",
+             "resolved": "https://registry.npmjs.org/dayjs/-/dayjs-1.11.23.tgz",
+             "integrity": "sha512-QDTCU0M0MxR3hQfnlDJfwekQiaanm1ubOD231u73WBckQ/fsamwRLiE2GBz6D3a/xF1NgfiDLJjXBa1hYOYTtQ==",
+-            "license": "MIT",
+-            "peer": true
++            "license": "MIT"
+         },
+         "node_modules/debug": {
+             "version": "4.4.3",
+@@ -3856,6 +3875,7 @@
+             "integrity": "sha512-YGRs8knHhKHVShLkFET/rWAU8kmHbOV5LwN938RHI0pljAJ1Gf6SzXsSmRaEzcXTtOOmVqJ5+WtQPL5uigY50Q==",
+             "dev": true,
+             "license": "MIT",
++            "peer": true,
+             "engines": {
+                 "node": ">=14"
+             }
+@@ -4200,7 +4220,6 @@
+                 }
+             ],
+             "license": "MIT",
+-            "peer": true,
+             "peerDependencies": {
+                 "typescript": "^5 || ^6 || ^7"
+             },
+@@ -4256,6 +4275,7 @@
+             "integrity": "sha512-Iqv2fzaTQN28s/FwZAoFq0ZSs/7hMAHJVX+w8PZl3cY19Pxk6jFFalxQoIfW2826i/fDLXv8IiEZRIT0lDuWcg==",
+             "dev": true,
+             "license": "MIT",
++            "peer": true,
+             "funding": {
+                 "type": "github",
+                 "url": "https://github.com/sponsors/wooorm"
+@@ -5041,6 +5061,7 @@
+             "integrity": "sha512-4pfM1Ff0x50o0tQwb5ucw/RzNyD0/YJME6IVcStalZuMWxdt3sR3huStTtxz4PUmvZfRguvDejasvQ2kifR11g==",
+             "dev": true,
+             "license": "BlueOak-1.0.0",
++            "peer": true,
+             "engines": {
+                 "node": "20 || >=22"
+             }
+@@ -5925,7 +5946,6 @@
+             "resolved": "https://registry.npmjs.org/react/-/react-19.2.8.tgz",
+             "integrity": "sha512-PWaYA1L/q9u2u7xYQi+Y3L3Yfnie7XyLeaJICV1MGD6LprsBxcAqGjYyr0eY3p+QdsA+x/Irkt4Qif8D63+Sbw==",
+             "license": "MIT",
+-            "peer": true,
+             "engines": {
+                 "node": ">=0.10.0"
+             }
+@@ -5935,7 +5955,6 @@
+             "resolved": "https://registry.npmjs.org/react-dom/-/react-dom-19.2.8.tgz",
+             "integrity": "sha512-rVprimfGBG3DR+Tq0IQG2DT5PxKth1WIGDmj5yPmlzr4YBe7uyE+Du4oVqTDXZSHGGGXRtTJEGSSePyQCMBglQ==",
+             "license": "MIT",
+-            "peer": true,
+             "dependencies": {
+                 "scheduler": "^0.27.0"
+             },
+@@ -6594,7 +6613,6 @@
+             "resolved": "https://registry.npmjs.org/typescript/-/typescript-7.0.2.tgz",
+             "integrity": "sha512-8FYau96o3NKOhbjKi/qNvG/W5jhzxkbdm5sj9AbZ/5T5sWqn3hJgLfGx27sRKZWTvyzCP8dLRBTf5tBTSRVUNA==",
+             "license": "Apache-2.0",
+-            "peer": true,
+             "bin": {
+                 "tsc": "bin/tsc"
+             },
+@@ -6795,7 +6813,6 @@
+             "resolved": "https://registry.npmjs.org/vite/-/vite-8.2.1.tgz",
+             "integrity": "sha512-EU/eS7BH3XROHh2YnBefjM6DBKA6ZeMZEYQbj7NLWg5wHYlhB8B/Mayd5XsgWq+NFYccDOTemRpdETWR6Ka/lw==",
+             "license": "MIT",
+-            "peer": true,
+             "dependencies": {
+                 "lightningcss": "^1.33.0",
+                 "picomatch": "^4.0.5",
+diff --git a/package.json b/package.json
+index bbf0803..f5301de 100644
+--- a/package.json
++++ b/package.json
+@@ -7,6 +7,8 @@
+         "@ant-design/icons": "^6.3.2",
+         "@dnd-kit/core": "^6.3.1",
+         "@dnd-kit/sortable": "^10.0.0",
++        "@fontsource-variable/fredoka": "^5.3.0",
++        "@fontsource-variable/nunito": "^5.3.0",
+         "@remix-run/router": "^1.23.4",
+         "@types/jest": "^30.0.0",
+         "@types/node": "^26.2.0",
+diff --git a/src/App.tsx b/src/App.tsx
+index 10ed2c1..fb1662a 100644
+--- a/src/App.tsx
++++ b/src/App.tsx
+@@ -60,8 +60,15 @@ import MatrixRain from "./styles/matrix/matrixRain";
+ import { detectColorScheme } from "./utils/browser/browserUtils";
+ import { StyledThemeProvider } from "./provider/StyledThemeProvider";
+ 
++import { SetupPage } from "./pages/setup/SetupPage";
++import { MobileTabBar } from "./components/common/navigation/MobileTabBar";
++import { buildCrewTheme } from "./crewcloud/theme";
++import { useIsMobile } from "./crewcloud/useIsMobile";
++import { TAB_BAR_HEIGHT } from "./crewcloud/brand";
++
+ function App() {
+     const { defaultAlgorithm, darkAlgorithm } = theme;
++    const isMobile = useIsMobile();
+ 
+     const [themeMode, setThemeMode] = useState<string>(() => {
+         const savedTheme = localStorage.getItem("theme");
+@@ -82,7 +89,7 @@ function App() {
+ 
+     const updateMetaThemeColor = (mode: "light" | "dark" | "matrix") => {
+         const themeColorMeta = document.querySelector('meta[name="theme-color"]');
+-        const color = mode === "dark" || mode === "matrix" ? "#000000" : "#f5f5f5";
++        const color = mode === "matrix" ? "#000000" : mode === "dark" ? "#120f22" : "#f7f3fb";
+ 
+         if (themeColorMeta) {
+             themeColorMeta.setAttribute("content", color);
+@@ -136,33 +143,27 @@ function App() {
+               : defaultAlgorithm;
+ 
+     return (
+-        <ConfigProvider
+-            theme={{
+-                algorithm,
+-                components: {
+-                    Slider: {
+-                        dotSize: 3,
+-                        handleSize: 6,
+-                        handleSizeHover: 8,
+-                        railSize: 4,
+-                    },
+-                    Popover: {
+-                        titleMinWidth: 0,
+-                    },
+-                },
+-            }}
+-        >
++        <ConfigProvider theme={buildCrewTheme(effectiveThemeMode, isMobile, algorithm)}>
+             <StyledThemeProvider>
+                 {effectiveThemeMode === "matrix" && <MatrixRain />}
+                 <TeddyCloudProvider>
+                     <div className="App">
+-                        <Layout style={{ minHeight: "100vh" }}>
++                        <Layout
++                            style={{
++                                minHeight: "100vh",
++                                // keep content clear of the phone tab bar
++                                paddingBottom: isMobile
++                                    ? `calc(${TAB_BAR_HEIGHT}px + env(safe-area-inset-bottom))`
++                                    : 0,
++                            }}
++                        >
+                             <Router basename={import.meta.env.VITE_APP_TEDDYCLOUD_WEB_BASE}>
+                                 <StyledHeader themeSwitch={themeSwitchIcon} themeMode={themeMode} />
+                                 <AudioProvider>
+                                     <Layout>
+                                         <Routes>
+                                             <Route path="/" element={<HomePage />} />
++                                            <Route path="/setup" element={<SetupPage />} />
+                                             <Route path="/home/stats" element={<StatsPage />} />
+                                             <Route
+                                                 path="/home/features"
+@@ -344,6 +345,12 @@ function App() {
+                                         </Routes>
+                                     </Layout>
+                                     <StyledFooter />
++                                    {isMobile && (
++                                        <MobileTabBar
++                                            themeMode={themeMode}
++                                            onThemeModeChange={setThemeMode}
++                                        />
++                                    )}
+                                 </AudioProvider>
+                             </Router>
+                         </Layout>
+diff --git a/src/assets/crewcloud-logo.svg b/src/assets/crewcloud-logo.svg
+new file mode 100644
+index 0000000..77f3fd0
+--- /dev/null
++++ b/src/assets/crewcloud-logo.svg
+@@ -0,0 +1,30 @@
++<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="CrewCloud">
++  <defs>
++    <linearGradient id="cc-bg" x1="0" y1="0" x2="1" y2="1">
++      <stop offset="0" stop-color="#ff8fab"/>
++      <stop offset="1" stop-color="#8b6df2"/>
++    </linearGradient>
++  </defs>
++  <rect x="1" y="1" width="62" height="62" rx="17" fill="url(#cc-bg)"/>
++  <!-- ears -->
++  <circle cx="28.5" cy="17.5" r="5.2" fill="#fff"/>
++  <circle cx="45.5" cy="17.5" r="5.2" fill="#fff"/>
++  <circle cx="28.5" cy="17.5" r="2.4" fill="#ffc2d1"/>
++  <circle cx="45.5" cy="17.5" r="2.4" fill="#ffc2d1"/>
++  <!-- cloud body: head bump + side bumps + base -->
++  <g fill="#fff">
++    <circle cx="37" cy="29" r="13"/>
++    <circle cx="21.5" cy="36" r="9"/>
++    <circle cx="50.5" cy="37.5" r="7.5"/>
++    <rect x="12.5" y="36" width="45.5" height="14.5" rx="7.25"/>
++  </g>
++  <!-- face -->
++  <g fill="#3a2f5b">
++    <circle cx="32" cy="29.5" r="2"/>
++    <circle cx="42" cy="29.5" r="2"/>
++    <ellipse cx="37" cy="34" rx="2.6" ry="1.9"/>
++  </g>
++  <path d="M33.8 37.2c1.7 1.6 4.7 1.6 6.4 0" fill="none" stroke="#3a2f5b" stroke-width="1.7" stroke-linecap="round"/>
++  <circle cx="28.6" cy="34.2" r="1.9" fill="#ffc2d1" opacity=".9"/>
++  <circle cx="45.4" cy="34.2" r="1.9" fill="#ffc2d1" opacity=".9"/>
++</svg>
+diff --git a/src/components/common/StyledComponents.tsx b/src/components/common/StyledComponents.tsx
+index e41b594..a83ea15 100644
+--- a/src/components/common/StyledComponents.tsx
++++ b/src/components/common/StyledComponents.tsx
+@@ -1,10 +1,14 @@
+-import { JSX, useEffect, useMemo } from "react";
++import { JSX, ReactNode, useEffect, useMemo } from "react";
+ import { useTranslation } from "react-i18next";
+ 
+-import { Breadcrumb, Layout, Menu } from "antd";
++import { Breadcrumb, Button, Drawer, Layout, Menu, theme } from "antd";
++import { AppstoreOutlined } from "@ant-design/icons";
+ import Sider from "antd/es/layout/Sider";
+ import styled from "styled-components";
+ import { extractText } from "../../utils/strings/extractText";
++import { useIsMobile } from "../../crewcloud/useIsMobile";
++import { BRAND_NAME } from "../../crewcloud/brand";
++import { useTeddyCloud } from "../../provider/TeddyCloudProvider";
+ 
+ type BreadcrumbItem = {
+     title: JSX.Element | string;
+@@ -19,7 +23,7 @@ export const StyledSubMenu = styled(Menu)`
+     border-right: 0;
+ `;
+ 
+-export const StyledSider = styled(Sider)`
++const StyledSiderBase = styled(Sider)`
+     min-width: 230px !important;
+ 
+     @media (max-width: 767px) {
+@@ -27,11 +31,86 @@ export const StyledSider = styled(Sider)`
+     }
+ `;
+ 
++const SectionBar = styled.div<{ $bg: string; $border: string; $color: string }>`
++    color: ${({ $color }) => $color};
++    display: flex;
++    align-items: center;
++    justify-content: space-between;
++    gap: 12px;
++    margin: 12px 12px 0;
++    padding: 6px 6px 6px 16px;
++    border-radius: 16px;
++    background: ${({ $bg }) => $bg};
++    border: 1px solid ${({ $border }) => $border};
++`;
++
++const SectionTitle = styled.div`
++    font-weight: 800;
++    font-size: 17px;
++    overflow: hidden;
++    text-overflow: ellipsis;
++    white-space: nowrap;
++`;
++
++/**
++ * The per-section menu (e.g. Tonies > Library, Add audio, Player...).
++ * Desktop: the usual left sider. Phones: a compact bar at the top of the page with a button that
++ * opens the same menu as a bottom sheet. The sheet uses the shared `subNavOpen` state, so every
++ * existing sub-nav link already closes it when tapped.
++ */
++export const StyledSider = ({ children }: { children?: ReactNode }) => {
++    const isMobile = useIsMobile();
++    const { t } = useTranslation();
++    const { token } = theme.useToken();
++    const { subNavOpen, setSubNavOpen, currentTCSection } = useTeddyCloud();
++
++    if (!isMobile) {
++        return <StyledSiderBase>{children}</StyledSiderBase>;
++    }
++
++    return (
++        <>
++            <SectionBar
++                $bg={token.colorBgContainer}
++                $border={token.colorBorderSecondary}
++                $color={token.colorText}
++            >
++                <SectionTitle>{currentTCSection || BRAND_NAME}</SectionTitle>
++                <Button
++                    type="text"
++                    icon={<AppstoreOutlined />}
++                    onClick={() => setSubNavOpen(true)}
++                    data-testid="section-menu-button"
++                    style={{ fontWeight: 700, color: token.colorPrimary }}
++                >
++                    {t("crewcloud.nav.sectionPages", "Pages")}
++                </Button>
++            </SectionBar>
++            <Drawer
++                className="crew-sheet"
++                placement="bottom"
++                open={subNavOpen}
++                onClose={() => setSubNavOpen(false)}
++                title={currentTCSection}
++                size="auto"
++                forceRender
++                styles={{ wrapper: { height: "auto", maxHeight: "85vh" } }}
++            >
++                {children}
++            </Drawer>
++        </>
++    );
++};
++
+ export const StyledLayout = styled(Layout)`
+     padding: 0 24px 24px;
++
++    @media (max-width: 767px) {
++        padding: 0 12px 16px;
++    }
+ `;
+ 
+-export const StyledBreadcrumb = styled(Breadcrumb)`
++export const StyledBreadcrumb = styled(Breadcrumb).attrs({ className: "crew-breadcrumb" })`
+     margin: 16px 0;
+ `;
+ 
+@@ -39,7 +118,14 @@ export const StyledContent = styled(Layout.Content)`
+     padding: 24px;
+     margin: 0;
+     min-height: 280px;
++    border-radius: 18px;
+     background: ${({ theme }) => theme.antdToken.colorBgContainer};
++
++    @media (max-width: 767px) {
++        padding: 16px 14px;
++        margin-top: 12px;
++        border-radius: 16px;
++    }
+ `;
+ 
+ export const HiddenDesktop = styled.span`
+@@ -58,14 +144,14 @@ const BreadcrumbWrapper: React.FC<BreadcrumbWrapperProps> = ({ items }) => {
+     const { t } = useTranslation();
+ 
+     const pageTitle = useMemo(() => {
+-        if (items.length <= 1) return "TeddyCloud";
++        if (items.length <= 1) return BRAND_NAME;
+ 
+         const translated = items
+             .slice(1)
+             .map((i) => t(extractText(i.title)))
+             .join(" - ");
+ 
+-        return `TeddyCloud - ${translated}`;
++        return `${BRAND_NAME} - ${translated}`;
+     }, [items, t]);
+ 
+     useEffect(() => {
+diff --git a/src/components/common/buttons/NotificationButton.tsx b/src/components/common/buttons/NotificationButton.tsx
+index 503e645..ba2ee3e 100644
+--- a/src/components/common/buttons/NotificationButton.tsx
++++ b/src/components/common/buttons/NotificationButton.tsx
+@@ -2,18 +2,28 @@ import React from "react";
+ import { Button, Badge } from "antd";
+ import { BellOutlined } from "@ant-design/icons";
+ import { useNavigate } from "react-router-dom";
++import { useTranslation } from "react-i18next";
+ 
++/** Header bell: a translucent circle that reads well on the gradient header (40px tap target). */
+ const NotificationButton: React.FC<{ notificationCount: number }> = ({ notificationCount }) => {
+     const navigate = useNavigate();
++    const { t } = useTranslation();
+ 
+     return (
+-        <Badge dot={notificationCount > 0} offset={[-2, 2]}>
++        <Badge dot={notificationCount > 0} offset={[-4, 4]}>
+             <Button
+                 shape="circle"
+-                icon={<BellOutlined />}
+-                size="small"
++                icon={<BellOutlined style={{ fontSize: 19, color: "#fff" }} />}
++                aria-label={t("crewcloud.nav.notifications", "Notifications")}
+                 onClick={() => navigate("/settings/notifications")}
+-                style={{ backgroundColor: "white", color: "black" }}
++                style={{
++                    width: 40,
++                    height: 40,
++                    minWidth: 40,
++                    backgroundColor: "rgba(255, 255, 255, 0.18)",
++                    border: 0,
++                    boxShadow: "none",
++                }}
+             />
+         </Badge>
+     );
+diff --git a/src/components/common/footer/StyledFooter.tsx b/src/components/common/footer/StyledFooter.tsx
+index c22f075..b56af43 100644
+--- a/src/components/common/footer/StyledFooter.tsx
++++ b/src/components/common/footer/StyledFooter.tsx
+@@ -14,6 +14,7 @@ import {
+ import AudioPlayerFooter from "./AudioPlayerFooter";
+ import { HiddenDesktop, HiddenMobile } from "../StyledComponents";
+ import { useTeddyCloudVersion } from "../../../hooks/useTeddyCloudVersion";
++import { BRAND_NAME, TAB_BAR_HEIGHT } from "../../../crewcloud/brand";
+ 
+ const { useToken } = theme;
+ const { Footer } = Layout;
+@@ -28,6 +29,14 @@ const StyledFooterComponent = styled(Footer)<{ $sticky: boolean }>`
+     align-items: center;
+     padding: 16px 24px;
+     color: white;
++
++    @media (max-width: 767px) {
++        padding: 10px 12px;
++        /* when the audio player pins the footer, keep it above the phone tab bar */
++        bottom: ${({ $sticky }) =>
++            $sticky ? `calc(${TAB_BAR_HEIGHT}px + env(safe-area-inset-bottom))` : "0"};
++        z-index: ${({ $sticky }) => ($sticky ? 980 : 10)};
++    }
+ `;
+ 
+ const StyledCenterPart = styled.div`
+@@ -83,6 +92,7 @@ export const StyledFooter = () => {
+                 </StyledCenterPart>
+                 <StyledCenterPart>
+                     <small style={{ display: "flex", color: colorText, whiteSpace: "nowrap" }}>
++                        <span style={{ paddingRight: 8, fontWeight: 700 }}>{BRAND_NAME}</span>
+                         <Link
+                             to={
+                                 isDevelopVersion
+@@ -130,21 +140,22 @@ export const StyledFooter = () => {
+                                 </Link>
+                             </span>
+                         )}
+-                        <span style={{ paddingLeft: 8 }}>-</span>
+-                        <HeartFilled style={{ color: "#eb2f96", paddingLeft: 8 }} />
+-                        <HiddenMobile style={{ paddingLeft: 8 }}>
+-                            {t("footer.sponsorText")}{" "}
++                        {/* on phones the sponsor link lives in the More sheet, with its context */}
++                        <HiddenMobile>
++                            <span style={{ paddingLeft: 8 }}>-</span>
++                            <HeartFilled style={{ color: "#eb2f96", paddingLeft: 8 }} />
++                            <span style={{ paddingLeft: 8 }}>{t("footer.sponsorText")} </span>
++                            <b>
++                                <Link
++                                    to={gitHubSponsoringUrl}
++                                    target="_blank"
++                                    rel="noopener noreferrer"
++                                    style={{ paddingLeft: 8 }}
++                                >
++                                    {t("footer.sponsor")}
++                                </Link>
++                            </b>
+                         </HiddenMobile>
+-                        <b>
+-                            <Link
+-                                to={gitHubSponsoringUrl}
+-                                target="_blank"
+-                                rel="noopener noreferrer"
+-                                style={{ paddingLeft: 8 }}
+-                            >
+-                                {t("footer.sponsor")}
+-                            </Link>
+-                        </b>
+                     </small>
+                 </StyledCenterPart>
+             </StyledFooterComponent>
+diff --git a/src/components/common/header/ServerStatus.tsx b/src/components/common/header/ServerStatus.tsx
+index 040254f..9edeb52 100644
+--- a/src/components/common/header/ServerStatus.tsx
++++ b/src/components/common/header/ServerStatus.tsx
+@@ -1,13 +1,15 @@
+ import { useEffect, useState, useCallback } from "react";
+ import { useTranslation } from "react-i18next";
+-import { Space, Tag, Tooltip, theme } from "antd";
++import { Popover, Space, Tag, Tooltip, theme } from "antd";
+ import { CheckCircleOutlined, CloseCircleOutlined, LockOutlined } from "@ant-design/icons";
++import styled from "styled-components";
+ 
+ import { defaultAPIConfig } from "../../../config/defaultApiConfig";
+ import { BoxineApi, BoxineForcedApi, TeddyCloudApi } from "../../../api";
+ 
+-import { HiddenDesktop, HiddenMobile } from "../StyledComponents";
+ import { useTeddyCloud } from "../../../provider/TeddyCloudProvider";
++import { useIsMobile } from "../../../crewcloud/useIsMobile";
++import { BRAND_NAME } from "../../../crewcloud/brand";
+ 
+ const boxineApi = new BoxineApi(defaultAPIConfig());
+ const boxineForcedApi = new BoxineForcedApi(defaultAPIConfig());
+@@ -20,6 +22,7 @@ const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+ export const ServerStatus = () => {
+     const { t } = useTranslation();
+     const { token } = useToken();
++    const isMobile = useIsMobile();
+     const { fetchCloudStatus, setToniesCloudAvailable } = useTeddyCloud();
+ 
+     const [boxineStatus, setBoxineStatus] = useState(false);
+@@ -102,17 +105,52 @@ export const ServerStatus = () => {
+         color: token.colorTextLightSolid,
+     };
+ 
+-    return (
+-        <Space>
+-            <Tooltip
+-                title={
+-                    boxineEnabledStatus
+-                        ? boxineStatus
+-                            ? t("server.boxineStatusOnline")
+-                            : t("server.boxineStatusOffline")
+-                        : t("server.boxineDisabled")
++    const boxineText = boxineEnabledStatus
++        ? boxineStatus
++            ? t("server.boxineStatusOnline")
++            : t("server.boxineStatusOffline")
++        : t("server.boxineDisabled");
++    const teddyText = teddyStatus
++        ? t("server.teddycloudStatusOnline")
++        : t("server.teddycloudStatusOffline");
++
++    // Phones: one status dot (green = the server is reachable) that explains itself on tap,
++    // instead of two cryptic "B" / "TC" badges competing for header space.
++    if (isMobile) {
++        return (
++            <Popover
++                trigger="click"
++                placement="bottomRight"
++                content={
++                    <div style={{ maxWidth: 260, lineHeight: 1.5 }}>
++                        <div style={{ display: "flex", gap: 8, alignItems: "baseline" }}>
++                            <StatusDot $color={teddyBgColor} />
++                            <span>{teddyText}</span>
++                        </div>
++                        <div
++                            style={{
++                                display: "flex",
++                                gap: 8,
++                                alignItems: "baseline",
++                                marginTop: 8,
++                            }}
++                        >
++                            <StatusDot $color={boxineBgColor} />
++                            <span>{boxineText}</span>
++                        </div>
++                    </div>
+                 }
+             >
++                <StatusButton type="button" aria-label={teddyText} data-testid="server-status">
++                    <StatusDot $color={teddyBgColor} $big />
++                </StatusButton>
++            </Popover>
++        );
++    }
++
++    return (
++        <Space>
++            <Tooltip title={boxineText}>
+                 <Tag
+                     icon={
+                         boxineEnabledStatus ? (
+@@ -131,18 +169,11 @@ export const ServerStatus = () => {
+                         backgroundColor: boxineBgColor,
+                     }}
+                 >
+-                    <HiddenDesktop>B</HiddenDesktop>
+-                    <HiddenMobile>Boxine</HiddenMobile>
++                    {t("crewcloud.status.cloud", "Tonies cloud")}
+                 </Tag>
+             </Tooltip>
+ 
+-            <Tooltip
+-                title={
+-                    teddyStatus
+-                        ? t("server.teddycloudStatusOnline")
+-                        : t("server.teddycloudStatusOffline")
+-                }
+-            >
++            <Tooltip title={teddyText}>
+                 <Tag
+                     icon={teddyStatus ? <CheckCircleOutlined /> : <CloseCircleOutlined />}
+                     style={{
+@@ -152,10 +183,30 @@ export const ServerStatus = () => {
+                         marginRight: 8,
+                     }}
+                 >
+-                    <HiddenDesktop>TC</HiddenDesktop>
+-                    <HiddenMobile>TeddyCloud</HiddenMobile>
++                    {BRAND_NAME}
+                 </Tag>
+             </Tooltip>
+         </Space>
+     );
+ };
++
++const StatusButton = styled.button`
++    all: unset;
++    cursor: pointer;
++    display: grid;
++    place-items: center;
++    width: 40px;
++    height: 40px;
++    border-radius: 50%;
++    background: rgba(255, 255, 255, 0.18);
++`;
++
++const StatusDot = styled.span<{ $color: string; $big?: boolean }>`
++    display: inline-block;
++    flex: none;
++    width: ${({ $big }) => ($big ? 14 : 10)}px;
++    height: ${({ $big }) => ($big ? 14 : 10)}px;
++    border-radius: 50%;
++    background: ${({ $color }) => $color};
++    box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.55);
++`;
+diff --git a/src/components/common/header/StyledHeader.tsx b/src/components/common/header/StyledHeader.tsx
+index 185920e..32e3173 100644
+--- a/src/components/common/header/StyledHeader.tsx
++++ b/src/components/common/header/StyledHeader.tsx
+@@ -1,53 +1,125 @@
+-import { useEffect, useState, useMemo, useCallback } from "react";
+-import { Link, useLocation } from "react-router-dom";
++import { useEffect, useMemo } from "react";
++import { Link, useLocation, useNavigate } from "react-router-dom";
+ import { useTranslation } from "react-i18next";
+ import styled from "styled-components";
+-import { Button, Drawer, Menu, MenuProps, theme } from "antd";
++import { Button, Menu, MenuProps, theme } from "antd";
+ import { Header } from "antd/es/layout/layout";
+-import { MenuOutlined, PlusOutlined } from "@ant-design/icons";
++import { PlusOutlined } from "@ant-design/icons";
+ 
+-import logoImg from "../../../assets/logo.png";
++import logoImg from "../../../assets/crewcloud-logo.svg";
+ 
+ import { ServerStatus } from "./ServerStatus";
+ import { StyledLanguageSwitcher } from "./StyledLanguageSwitcher";
+-import { HiddenDesktop, HiddenMobile } from "../StyledComponents";
+ import NotificationButton from "../buttons/NotificationButton";
+ import { useTeddyCloud } from "../../../provider/TeddyCloudProvider";
+-import { HomeSubNav } from "../../home/HomeSubNav";
+-import { CommunitySubNav } from "../../community/CommunitySubNav";
+-import { SettingsSubNav } from "../../settings/SettingsSubNav";
+-import { ToniesSubNav } from "../../tonies/ToniesSubNav";
+-import { TonieboxesSubNav } from "../../tonieboxes/TonieboxesSubNav";
++import { useIsMobile } from "../../../crewcloud/useIsMobile";
++import { BRAND_NAME, brandGradient, brandGradientDark } from "../../../crewcloud/brand";
+ 
+ const { useToken } = theme;
+ 
+-const StyledLogo = styled.img`
+-    height: 32px;
++/* Installed on a phone's home screen the page runs edge to edge (viewport-fit=cover, translucent
++   status bar), so the header grows by the status bar height and keeps clear of notches. */
++const HeaderBar = styled(Header)<{ $bg: string }>`
++    color: white;
++    display: flex;
++    align-items: center;
++    gap: 12px;
++    height: calc(64px + env(safe-area-inset-top));
++    padding: env(safe-area-inset-top) max(16px, env(safe-area-inset-right)) 0
++        max(16px, env(safe-area-inset-left));
++    background: ${({ $bg }) => $bg} !important;
++    box-shadow: 0 2px 16px rgba(58, 47, 91, 0.18);
++
++    @media (max-width: 767px) {
++        height: calc(60px + env(safe-area-inset-top));
++        line-height: 60px;
++        padding: env(safe-area-inset-top) max(12px, env(safe-area-inset-right)) 0
++            max(12px, env(safe-area-inset-left));
++    }
+ `;
+ 
+-const StyledHeaderComponent = styled(Header)`
+-    color: white;
++const Brand = styled(Link)`
+     display: flex;
+     align-items: center;
+-    padding: 0 16px;
+-    background: #141414;
++    gap: 10px;
++    color: #fff !important;
++    text-decoration: none;
++    flex: none;
+ `;
+ 
+-const StyledRightPart = styled.div`
++const Logo = styled.img`
++    height: 36px;
++    width: 36px;
++    border-radius: 11px;
++    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.85);
++`;
++
++const Wordmark = styled.span`
++    font-family:
++        "Fredoka Variable", "Fredoka", "Nunito Variable", ui-rounded, system-ui, sans-serif;
++    font-weight: 700;
++    font-size: 21px;
++    letter-spacing: 0.2px;
++    white-space: nowrap;
++    text-shadow: 0 1px 2px rgba(58, 47, 91, 0.25);
++`;
++
++const TopMenu = styled(Menu)`
++    &.ant-menu {
++        flex: 1;
++        min-width: 0;
++        background: transparent !important;
++        border-bottom: 0 !important;
++        line-height: 44px;
++    }
++    .ant-menu-item,
++    .ant-menu-submenu-title,
++    .ant-menu-item a {
++        color: rgba(255, 255, 255, 0.9) !important;
++        font-weight: 700;
++        font-size: 15px;
++    }
++    .ant-menu-item {
++        border-radius: 12px;
++        margin: 0 2px !important;
++    }
++    .ant-menu-item-selected,
++    .ant-menu-item:hover,
++    .ant-menu-item-active {
++        background: rgba(255, 255, 255, 0.2) !important;
++    }
++    .ant-menu-item-selected a,
++    .ant-menu-item:hover a {
++        color: #fff !important;
++    }
++    .ant-menu-item::after,
++    .ant-menu-item-selected::after {
++        display: none !important;
++    }
++`;
++
++const RightPart = styled.div`
+     margin-left: auto;
+     display: flex;
+     align-items: center;
+-`;
++    gap: 10px;
++    color: #fff;
+ 
+-const StyledMenu = styled(Menu)`
+-    .ant-menu-title-content {
+-        width: 100%;
++    .anticon {
++        color: #fff;
+     }
+ `;
+ 
+-const NoHoverButton = styled(Button)`
+-    &:hover {
+-        background: transparent !important;
++const AddButton = styled(Button)`
++    &.ant-btn {
++        background: #fff !important;
++        color: #6f54d6 !important;
++        border: 0 !important;
++        font-weight: 800;
++        box-shadow: 0 4px 12px rgba(58, 47, 91, 0.22);
++    }
++    &.ant-btn .anticon {
++        color: #6f54d6 !important;
+     }
+ `;
+ 
+@@ -61,27 +133,17 @@ export const StyledHeader = ({
+     const { t } = useTranslation();
+     const { token } = useToken();
+     const location = useLocation();
++    const navigate = useNavigate();
++    const isMobile = useIsMobile();
++    const { unconfirmedCount, setNavOpen, setSubNavOpen } = useTeddyCloud();
+ 
+-    const {
+-        unconfirmedCount,
+-        navOpen,
+-        setNavOpen,
+-        subNavOpen,
+-        setSubNavOpen,
+-        currentTCSection,
+-        setCurrentTCSection,
+-    } = useTeddyCloud();
+-
+-    const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
+-
+-    // Responsive Detection
+-    useEffect(() => {
+-        const handleResize = () => setIsMobile(window.innerWidth <= 768);
+-        window.addEventListener("resize", handleResize);
+-        return () => window.removeEventListener("resize", handleResize);
+-    }, []);
++    const effectiveDark =
++        themeMode === "dark" ||
++        (themeMode === "auto" && window.matchMedia?.("(prefers-color-scheme: dark)").matches);
++    const headerBg =
++        themeMode === "matrix" ? "#000000" : effectiveDark ? brandGradientDark : brandGradient;
+ 
+-    // Closing on desktop switch
++    // Close any mobile sheets when switching to the desktop layout
+     useEffect(() => {
+         if (!isMobile) {
+             setNavOpen(false);
+@@ -89,7 +151,7 @@ export const StyledHeader = ({
+         }
+     }, [isMobile, setNavOpen, setSubNavOpen]);
+ 
+-    // Theme-color meta tag sync
++    // Browser UI colour (phone status bar / tab strip) follows the header
+     useEffect(() => {
+         let meta = document.querySelector('meta[name="theme-color"]') as HTMLMetaElement | null;
+         if (!meta) {
+@@ -97,10 +159,10 @@ export const StyledHeader = ({
+             meta.name = "theme-color";
+             document.head.appendChild(meta);
+         }
+-        meta.content = token.colorBgBase;
+-    }, [token.colorBgBase]);
++        meta.content = themeMode === "matrix" ? "#000000" : effectiveDark ? "#2b2250" : "#b67fd0";
++    }, [themeMode, effectiveDark]);
+ 
+-    // Scrollbar color sync
++    // Scrollbar colour sync
+     useEffect(() => {
+         const root = document.documentElement;
+         if (themeMode === "matrix") {
+@@ -110,147 +172,55 @@ export const StyledHeader = ({
+         }
+     }, [themeMode, token]);
+ 
+-    // Helper: Navigation Item
+-    const NavItem = useCallback(
+-        ({ title, to }: { title: string; to: string }) => {
+-            const handleClickMain = () => setNavOpen(false);
+-            const handleExpand = () => {
+-                setCurrentTCSection(title);
+-                if (isMobile) setSubNavOpen(true);
+-            };
+-
+-            if (isMobile) {
+-                return (
+-                    <div
+-                        style={{
+-                            display: "flex",
+-                            gap: 16,
+-                            width: "100%",
+-                            justifyContent: "space-between",
+-                            alignItems: "center",
+-                        }}
+-                    >
+-                        <Link to={to} onClick={handleClickMain}>
+-                            {title}
+-                        </Link>
+-                        <NoHoverButton
+-                            type="text"
+-                            icon={<PlusOutlined style={{ margin: 16 }} />}
+-                            onClick={handleExpand}
+-                        />
+-                    </div>
+-                );
+-            }
+-
+-            return (
+-                <Link to={to} onClick={handleClickMain}>
+-                    {title}
+-                </Link>
+-            );
+-        },
+-        [isMobile, setCurrentTCSection, setSubNavOpen, setNavOpen],
+-    );
+-
+-    // Main Navigation Items
+     const mainNav: MenuProps["items"] = useMemo(
+         () => [
+-            { key: "/", label: <NavItem title={t("home.navigationTitle")} to="/" /> },
+-            { key: "tonies", label: <NavItem title={t("tonies.navigationTitle")} to="/tonies" /> },
++            { key: "/", label: <Link to="/">{t("home.navigationTitle")}</Link> },
++            { key: "tonies", label: <Link to="/tonies">{t("tonies.navigationTitle")}</Link> },
+             {
+                 key: "tonieboxes",
+-                label: <NavItem title={t("tonieboxes.navigationTitle")} to="/tonieboxes" />,
+-            },
+-            {
+-                key: "settings",
+-                label: <NavItem title={t("settings.navigationTitle")} to="/settings" />,
++                label: <Link to="/tonieboxes">{t("tonieboxes.navigationTitle")}</Link>,
+             },
++            { key: "settings", label: <Link to="/settings">{t("settings.navigationTitle")}</Link> },
+             {
+                 key: "community",
+-                label: <NavItem title={t("community.navigationTitle")} to="/community" />,
++                label: <Link to="/community">{t("community.navigationTitle")}</Link>,
+             },
+         ],
+-        [NavItem, t],
++        [t],
+     );
+ 
+-    // Get selected navigation key
+     const selectedKey = useMemo(() => {
+         const part = location.pathname.split("/")[1];
+-        return !part || part === "home" ? "/" : part;
++        return !part || part === "home" || part === "setup" ? "/" : part;
+     }, [location.pathname]);
+ 
+-    // Render sub nav
+-    const renderSubNav = () => {
+-        switch (currentTCSection) {
+-            case t("community.navigationTitle"):
+-                return <CommunitySubNav />;
+-            case t("settings.navigationTitle"):
+-                return <SettingsSubNav />;
+-            case t("tonies.navigationTitle"):
+-                return <ToniesSubNav />;
+-            case t("tonieboxes.navigationTitle"):
+-                return <TonieboxesSubNav />;
+-            default:
+-                return <HomeSubNav />;
+-        }
+-    };
+-
+     return (
+-        <StyledHeaderComponent id="teddycloud-header">
+-            <Link
+-                to="/"
+-                style={{ color: "white", display: "flex", alignItems: "center", marginRight: 16 }}
+-            >
+-                <StyledLogo className="teddycloud-logo" src={logoImg} />
+-                <HiddenMobile style={{ textWrap: "nowrap" }}> TeddyCloud</HiddenMobile>
+-            </Link>
+-
+-            <HiddenMobile>
+-                <Menu
++        <HeaderBar id="teddycloud-header" $bg={headerBg}>
++            <Brand to="/" aria-label={BRAND_NAME}>
++                <Logo className="teddycloud-logo" src={logoImg} alt="" />
++                <Wordmark>{BRAND_NAME}</Wordmark>
++            </Brand>
++
++            {!isMobile && (
++                <TopMenu
+                     theme="dark"
+                     mode="horizontal"
+                     items={mainNav}
+                     selectedKeys={[selectedKey]}
+-                    style={{ width: "calc(100vw - 510px)" }}
+                 />
+-            </HiddenMobile>
+-
+-            <StyledRightPart>
++            )}
++
++            <RightPart>
++                {!isMobile && (
++                    <AddButton icon={<PlusOutlined />} onClick={() => navigate("/tonies/encoder")}>
++                        {t("crewcloud.nav.add", "Add audio")}
++                    </AddButton>
++                )}
+                 <ServerStatus />
+-                {themeSwitch}
+-                <StyledLanguageSwitcher />
++                {!isMobile && themeSwitch}
++                {!isMobile && <StyledLanguageSwitcher />}
+                 <NotificationButton notificationCount={unconfirmedCount} />
+-
+-                <HiddenDesktop style={{ marginLeft: 8 }}>
+-                    <Button
+-                        type="primary"
+-                        icon={<MenuOutlined />}
+-                        onClick={() => setNavOpen(true)}
+-                    />
+-
+-                    <Drawer
+-                        placement="right"
+-                        open={navOpen}
+-                        onClose={() => setNavOpen(false)}
+-                        title="TeddyCloud"
+-                    >
+-                        <StyledMenu
+-                            mode="vertical"
+-                            items={mainNav}
+-                            selectedKeys={[selectedKey]}
+-                            style={{ background: "transparent", borderRight: "none" }}
+-                        />
+-
+-                        <Drawer
+-                            placement="right"
+-                            open={subNavOpen}
+-                            onClose={() => setSubNavOpen(false)}
+-                            title={currentTCSection}
+-                        >
+-                            {renderSubNav()}
+-                        </Drawer>
+-                    </Drawer>
+-                </HiddenDesktop>
+-            </StyledRightPart>
+-        </StyledHeaderComponent>
++            </RightPart>
++        </HeaderBar>
+     );
+ };
+diff --git a/src/components/common/icons/CrewIcons.tsx b/src/components/common/icons/CrewIcons.tsx
+new file mode 100644
+index 0000000..c25b22c
+--- /dev/null
++++ b/src/components/common/icons/CrewIcons.tsx
+@@ -0,0 +1,47 @@
++import Icon from "@ant-design/icons";
++import type { GetProps } from "antd";
++
++type CustomIconProps = Partial<GetProps<typeof Icon>>;
++
++/** A tonie figurine: round head on a rounded body standing on a base. */
++const TonieSvg = () => (
++    <svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" aria-hidden="true">
++        <circle cx="12" cy="7" r="4" stroke="currentColor" strokeWidth="1.8" />
++        <path
++            d="M7.5 20v-4.2a4.5 4.5 0 0 1 9 0V20"
++            stroke="currentColor"
++            strokeWidth="1.8"
++            strokeLinecap="round"
++        />
++        <rect x="5.5" y="19.2" width="13" height="2.3" rx="1.15" fill="currentColor" />
++    </svg>
++);
++
++/** A Toniebox: a soft cube with two ears and a speaker grille. */
++const BoxSvg = () => (
++    <svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" aria-hidden="true">
++        <path
++            d="M7 5.2V3.8M17 5.2V3.8"
++            stroke="currentColor"
++            strokeWidth="1.8"
++            strokeLinecap="round"
++        />
++        <rect
++            x="3.5"
++            y="5"
++            width="17"
++            height="15.5"
++            rx="4"
++            stroke="currentColor"
++            strokeWidth="1.8"
++        />
++        <circle cx="9" cy="12.8" r="0.9" fill="currentColor" />
++        <circle cx="12" cy="12.8" r="0.9" fill="currentColor" />
++        <circle cx="15" cy="12.8" r="0.9" fill="currentColor" />
++        <circle cx="10.5" cy="15.6" r="0.9" fill="currentColor" />
++        <circle cx="13.5" cy="15.6" r="0.9" fill="currentColor" />
++    </svg>
++);
++
++export const TonieIcon = (props: CustomIconProps) => <Icon component={TonieSvg} {...props} />;
++export const BoxIcon = (props: CustomIconProps) => <Icon component={BoxSvg} {...props} />;
+diff --git a/src/components/common/navigation/MobileTabBar.tsx b/src/components/common/navigation/MobileTabBar.tsx
+new file mode 100644
+index 0000000..ec8fcd0
+--- /dev/null
++++ b/src/components/common/navigation/MobileTabBar.tsx
+@@ -0,0 +1,332 @@
++import { useMemo, useState } from "react";
++import { useLocation, useNavigate } from "react-router-dom";
++import { useTranslation } from "react-i18next";
++import styled from "styled-components";
++import { Drawer, Segmented, theme } from "antd";
++import {
++    AppstoreOutlined,
++    BookOutlined,
++    CustomerServiceOutlined,
++    HeartOutlined,
++    HomeOutlined,
++    PlayCircleOutlined,
++    PlusOutlined,
++    RocketOutlined,
++    SettingOutlined,
++    ToolOutlined,
++} from "@ant-design/icons";
++
++import { BoxIcon, TonieIcon } from "../icons/CrewIcons";
++import { BRAND_NAME, TAB_BAR_HEIGHT, UPSTREAM_NAME, brandGradient } from "../../../crewcloud/brand";
++import { useTeddyCloudVersion } from "../../../hooks/useTeddyCloudVersion";
++import { gitHubSponsoringUrl } from "../../../constants/urls";
++
++const { useToken } = theme;
++
++type TabKey = "home" | "tonies" | "add" | "boxes" | "more";
++
++const Bar = styled.nav<{ $bg: string; $border: string }>`
++    position: fixed;
++    left: 0;
++    right: 0;
++    bottom: 0;
++    z-index: 990; /* below drawers and modals (1000+) */
++    height: calc(${TAB_BAR_HEIGHT}px + env(safe-area-inset-bottom));
++    padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
++    display: grid;
++    grid-template-columns: repeat(5, 1fr);
++    align-items: stretch;
++    background: ${({ $bg }) => $bg};
++    border-top: 1px solid ${({ $border }) => $border};
++    backdrop-filter: saturate(160%) blur(14px);
++    -webkit-backdrop-filter: saturate(160%) blur(14px);
++`;
++
++const Tab = styled.button<{ $active: boolean; $color: string; $activeColor: string }>`
++    all: unset;
++    cursor: pointer;
++    display: flex;
++    flex-direction: column;
++    align-items: center;
++    justify-content: center;
++    gap: 3px;
++    min-height: 48px; /* comfortable touch target */
++    color: ${({ $active, $color, $activeColor }) => ($active ? $activeColor : $color)};
++    font-size: 12px;
++    font-weight: ${({ $active }) => ($active ? 800 : 600)};
++    letter-spacing: 0.1px;
++    -webkit-tap-highlight-color: transparent;
++    transition: transform 0.08s ease;
++
++    .anticon {
++        font-size: 23px;
++    }
++    &:active {
++        transform: scale(0.94);
++    }
++    &:focus-visible {
++        outline: 2px solid ${({ $activeColor }) => $activeColor};
++        outline-offset: -4px;
++        border-radius: 12px;
++    }
++`;
++
++const AddBubble = styled.span`
++    width: 52px;
++    height: 52px;
++    margin-top: -22px;
++    border-radius: 50%;
++    display: grid;
++    place-items: center;
++    color: #fff;
++    background: ${brandGradient};
++    box-shadow: 0 8px 20px rgba(139, 109, 242, 0.4);
++    .anticon {
++        font-size: 26px;
++    }
++`;
++
++const Tiles = styled.div`
++    display: grid;
++    grid-template-columns: 1fr 1fr;
++    gap: 10px;
++    margin: 4px 0 18px;
++`;
++
++const Tile = styled.button<{ $bg: string; $color: string; $border: string }>`
++    all: unset;
++    cursor: pointer;
++    display: flex;
++    align-items: center;
++    gap: 12px;
++    min-height: 56px;
++    padding: 12px 14px;
++    border-radius: 16px;
++    background: ${({ $bg }) => $bg};
++    border: 1px solid ${({ $border }) => $border};
++    color: ${({ $color }) => $color};
++    font-weight: 700;
++    font-size: 15px;
++    line-height: 1.2;
++    .anticon {
++        font-size: 22px;
++        flex: none;
++    }
++    &:active {
++        transform: scale(0.98);
++    }
++`;
++
++const SheetLabel = styled.div<{ $color: string }>`
++    font-size: 13px;
++    font-weight: 800;
++    text-transform: uppercase;
++    letter-spacing: 0.6px;
++    color: ${({ $color }) => $color};
++    margin: 6px 2px 8px;
++`;
++
++export const MobileTabBar = ({
++    themeMode,
++    onThemeModeChange,
++}: {
++    themeMode: string;
++    onThemeModeChange: (mode: string) => void;
++}) => {
++    const { t, i18n } = useTranslation();
++    const { token } = useToken();
++    const location = useLocation();
++    const navigate = useNavigate();
++    const { versionShort } = useTeddyCloudVersion();
++    const [moreOpen, setMoreOpen] = useState(false);
++
++    const active: TabKey = useMemo(() => {
++        const p = location.pathname;
++        if (p === "/" || p.startsWith("/home") || p.startsWith("/setup")) return "home";
++        if (p.startsWith("/tonies/encoder")) return "add";
++        if (p.startsWith("/tonies")) return "tonies";
++        if (p.startsWith("/tonieboxes")) return "boxes";
++        return "more";
++    }, [location.pathname]);
++
++    const go = (to: string) => {
++        setMoreOpen(false);
++        navigate(to);
++        window.scrollTo({ top: 0 });
++    };
++
++    const tabs: { key: TabKey; label: string; icon: React.ReactNode; onClick: () => void }[] = [
++        {
++            key: "home",
++            label: t("crewcloud.nav.home", "Home"),
++            icon: <HomeOutlined />,
++            onClick: () => go("/"),
++        },
++        {
++            key: "tonies",
++            label: t("crewcloud.nav.tonies", "Tonies"),
++            icon: <TonieIcon />,
++            onClick: () => go("/tonies"),
++        },
++        {
++            key: "add",
++            label: t("crewcloud.nav.add", "Add audio"),
++            icon: (
++                <AddBubble>
++                    <PlusOutlined />
++                </AddBubble>
++            ),
++            onClick: () => go("/tonies/encoder"),
++        },
++        {
++            key: "boxes",
++            label: t("crewcloud.nav.boxes", "Boxes"),
++            icon: <BoxIcon />,
++            onClick: () => go("/tonieboxes"),
++        },
++        {
++            key: "more",
++            label: t("crewcloud.nav.more", "More"),
++            icon: <AppstoreOutlined />,
++            onClick: () => setMoreOpen(true),
++        },
++    ];
++
++    const shortcuts = [
++        {
++            icon: <BookOutlined />,
++            label: t("crewcloud.more.library", "Library"),
++            to: "/tonies/library",
++        },
++        { icon: <RocketOutlined />, label: t("crewcloud.more.setup", "Setup guide"), to: "/setup" },
++        {
++            icon: <PlayCircleOutlined />,
++            label: t("crewcloud.more.player", "Audio player"),
++            to: "/tonies/audioplayer",
++        },
++        {
++            icon: <ToolOutlined />,
++            label: t("crewcloud.more.boxSetup", "Box setup"),
++            to: "/tonieboxes/boxsetup",
++        },
++        {
++            icon: <SettingOutlined />,
++            label: t("crewcloud.more.settings", "Settings"),
++            to: "/settings",
++        },
++        {
++            icon: <CustomerServiceOutlined />,
++            label: t("crewcloud.more.help", "Help & community"),
++            to: "/community",
++        },
++    ];
++
++    const currentLang = (i18n.resolvedLanguage || i18n.language || "en").substring(0, 2);
++
++    return (
++        <>
++            <Bar
++                aria-label={t("crewcloud.nav.label", "Main navigation")}
++                $bg={token.colorBgContainer + "ee"}
++                $border={token.colorBorderSecondary}
++            >
++                {tabs.map((tab) => (
++                    <Tab
++                        key={tab.key}
++                        type="button"
++                        onClick={tab.onClick}
++                        $active={active === tab.key}
++                        $color={token.colorTextSecondary}
++                        $activeColor={token.colorPrimary}
++                        aria-current={active === tab.key ? "page" : undefined}
++                        data-testid={`tab-${tab.key}`}
++                    >
++                        {tab.icon}
++                        <span>{tab.label}</span>
++                    </Tab>
++                ))}
++            </Bar>
++
++            <Drawer
++                className="crew-sheet"
++                placement="bottom"
++                open={moreOpen}
++                onClose={() => setMoreOpen(false)}
++                title={t("crewcloud.nav.more", "More")}
++                size="auto"
++                styles={{ wrapper: { height: "auto", maxHeight: "88vh" } }}
++            >
++                <Tiles>
++                    {shortcuts.map((s) => (
++                        <Tile
++                            key={s.to}
++                            type="button"
++                            onClick={() => go(s.to)}
++                            $bg={token.colorFillQuaternary}
++                            $color={token.colorText}
++                            $border={token.colorBorderSecondary}
++                        >
++                            <span style={{ color: token.colorPrimary }}>{s.icon}</span>
++                            {s.label}
++                        </Tile>
++                    ))}
++                </Tiles>
++
++                <SheetLabel $color={token.colorTextSecondary}>
++                    {t("crewcloud.more.appearance", "Appearance")}
++                </SheetLabel>
++                <Segmented
++                    block
++                    size="large"
++                    value={themeMode}
++                    onChange={(v) => onThemeModeChange(String(v))}
++                    options={[
++                        { value: "auto", label: t("crewcloud.more.themeAuto", "Auto") },
++                        { value: "light", label: t("crewcloud.more.themeLight", "Light") },
++                        { value: "dark", label: t("crewcloud.more.themeDark", "Dark") },
++                    ]}
++                    style={{ marginBottom: 16 }}
++                />
++
++                <SheetLabel $color={token.colorTextSecondary}>
++                    {t("crewcloud.more.language", "Language")}
++                </SheetLabel>
++                <Segmented
++                    block
++                    size="large"
++                    value={currentLang}
++                    onChange={(v) => i18n.changeLanguage(String(v))}
++                    options={[
++                        { value: "en", label: "EN" },
++                        { value: "de", label: "DE" },
++                        { value: "fr", label: "FR" },
++                        { value: "es", label: "ES" },
++                    ]}
++                    style={{ marginBottom: 18 }}
++                />
++
++                <div style={{ textAlign: "center", color: token.colorTextSecondary, fontSize: 13 }}>
++                    <HeartOutlined style={{ color: "#ff8fab", marginRight: 6 }} />
++                    {t(
++                        "crewcloud.more.credit",
++                        "{{brand}} is built on {{upstream}}, open-source software.",
++                        {
++                            brand: BRAND_NAME,
++                            upstream: UPSTREAM_NAME,
++                        },
++                    )}
++                    <div style={{ marginTop: 6 }}>
++                        <a href={gitHubSponsoringUrl} target="_blank" rel="noopener noreferrer">
++                            {t("crewcloud.footer.sponsorUpstream", "Support {{upstream}}", {
++                                upstream: UPSTREAM_NAME,
++                            })}
++                        </a>
++                    </div>
++                    {versionShort ? (
++                        <div style={{ marginTop: 4, opacity: 0.8 }}>{versionShort}</div>
++                    ) : null}
++                </div>
++            </Drawer>
++        </>
++    );
++};
+diff --git a/src/components/home/HomeSubNav.tsx b/src/components/home/HomeSubNav.tsx
+index 230806c..0958236 100644
+--- a/src/components/home/HomeSubNav.tsx
++++ b/src/components/home/HomeSubNav.tsx
+@@ -7,6 +7,7 @@ import {
+     ExportOutlined,
+     HeartOutlined,
+     HomeOutlined,
++    RocketOutlined,
+     WifiOutlined,
+ } from "@ant-design/icons";
+ 
+@@ -72,6 +73,22 @@ export const HomeSubNav = () => {
+             icon: React.createElement(HomeOutlined),
+             title: t("home.navigationTitle"),
+         },
++        {
++            key: "setup",
++            label: (
++                <Link
++                    to="/setup"
++                    onClick={() => {
++                        setNavOpen(false);
++                        setSubNavOpen(false);
++                    }}
++                >
++                    {t("crewcloud.more.setup", "Setup guide")}
++                </Link>
++            ),
++            icon: React.createElement(RocketOutlined),
++            title: t("crewcloud.more.setup", "Setup guide"),
++        },
+         {
+             key: "features",
+             label: (
+diff --git a/src/components/home/home/Home.tsx b/src/components/home/home/Home.tsx
+index d2bdaed..ff67c71 100644
+--- a/src/components/home/home/Home.tsx
++++ b/src/components/home/home/Home.tsx
+@@ -1,12 +1,23 @@
++import { ReactNode, useMemo, useState } from "react";
+ import { Link, useNavigate } from "react-router-dom";
+ import { useTranslation } from "react-i18next";
+-import { Alert, Button, Tabs, TabsProps, Typography } from "antd";
++import styled from "styled-components";
++import { Alert, Button, Progress, Typography, theme } from "antd";
++import {
++    BookOutlined,
++    CloseOutlined,
++    ExportOutlined,
++    PlayCircleOutlined,
++    PlusOutlined,
++    QuestionCircleOutlined,
++    RightOutlined,
++    RocketOutlined,
++} from "@ant-design/icons";
++
+ import {
+     forumUrl,
+     gitHubTCCommitTreeBaseUrl,
+     gitHubTCReleasesUrl,
+-    gitHubUrl,
+-    telegramGroupUrl,
+     wikiUrl,
+ } from "../../../constants/urls";
+ import LoadingSpinner from "../../common/elements/LoadingSpinner";
+@@ -14,12 +25,164 @@ import { TonieboxesList } from "../../tonieboxes/tonieboxeslist/TonieboxesList";
+ import { ToniesList } from "../../tonies/tonieslist/ToniesList";
+ import { useHomeData } from "./data/useHomeData";
+ import { useTeddyCloudVersion } from "../../../hooks/useTeddyCloudVersion";
+-import { ExportOutlined } from "@ant-design/icons";
++import { BoxIcon, TonieIcon } from "../../common/icons/CrewIcons";
++import { computeSetup, useLibraryCount } from "../../setup/useSetupStatus";
++import { BRAND_NAME, UPSTREAM_NAME, brandColors, brandGradient } from "../../../crewcloud/brand";
+ 
+ const { Paragraph } = Typography;
++const { useToken } = theme;
++
++const SETUP_DISMISSED_KEY = "crewcloud.setupCardDismissed";
++
++const Greeting = styled.div`
++    margin: 2px 0 18px;
++    h1 {
++        margin: 0 0 4px;
++    }
++`;
++
++const Actions = styled.div`
++    display: grid;
++    grid-template-columns: repeat(4, minmax(0, 1fr));
++    gap: 12px;
++    margin-bottom: 26px;
++
++    @media (max-width: 767px) {
++        grid-template-columns: repeat(2, minmax(0, 1fr));
++        gap: 10px;
++    }
++`;
++
++const HeroAction = styled.button`
++    all: unset;
++    cursor: pointer;
++    grid-column: 1 / -1;
++    display: flex;
++    align-items: center;
++    gap: 16px;
++    padding: 20px;
++    border-radius: 22px;
++    color: #fff;
++    background: ${brandGradient};
++    box-shadow: 0 12px 28px rgba(139, 109, 242, 0.32);
++    transition:
++        transform 0.08s ease,
++        filter 0.15s;
++
++    &:hover {
++        filter: brightness(1.04);
++    }
++    &:active {
++        transform: scale(0.99);
++    }
++    &:focus-visible {
++        outline: 3px solid #fff;
++        outline-offset: -6px;
++    }
++`;
++
++const HeroIcon = styled.span`
++    flex: none;
++    width: 56px;
++    height: 56px;
++    border-radius: 18px;
++    display: grid;
++    place-items: center;
++    background: rgba(255, 255, 255, 0.22);
++    font-size: 28px;
++`;
++
++const Tile = styled.button<{ $bg: string; $border: string; $color: string }>`
++    all: unset;
++    cursor: pointer;
++    display: flex;
++    flex-direction: column;
++    gap: 10px;
++    min-height: 104px;
++    padding: 16px;
++    border-radius: 18px;
++    background: ${({ $bg }) => $bg};
++    border: 1px solid ${({ $border }) => $border};
++    color: ${({ $color }) => $color};
++    transition:
++        transform 0.08s ease,
++        box-shadow 0.15s;
++
++    &:hover {
++        box-shadow: 0 6px 18px rgba(58, 47, 91, 0.1);
++    }
++    &:active {
++        transform: scale(0.98);
++    }
++    &:focus-visible {
++        outline: 3px solid ${brandColors.purple};
++        outline-offset: 2px;
++    }
++`;
++
++const TileIcon = styled.span<{ $bg: string; $color: string }>`
++    width: 42px;
++    height: 42px;
++    border-radius: 13px;
++    display: grid;
++    place-items: center;
++    font-size: 22px;
++    background: ${({ $bg }) => $bg};
++    color: ${({ $color }) => $color};
++`;
++
++const TileLabel = styled.span`
++    font-weight: 800;
++    font-size: 16px;
++    line-height: 1.2;
++`;
++
++const TileMeta = styled.span<{ $color: string }>`
++    color: ${({ $color }) => $color};
++    font-size: 14px;
++    margin-top: -6px;
++`;
++
++const SectionHead = styled.div`
++    display: flex;
++    align-items: baseline;
++    justify-content: space-between;
++    gap: 12px;
++    margin: 8px 0 12px;
++    h2 {
++        margin: 0;
++    }
++`;
++
++const EmptyCard = styled.div<{ $bg: string; $border: string }>`
++    padding: 18px;
++    border-radius: 18px;
++    background: ${({ $bg }) => $bg};
++    border: 1px dashed ${({ $border }) => $border};
++    margin-bottom: 26px;
++`;
++
++const SetupCard = styled.div<{ $bg: string }>`
++    position: relative;
++    padding: 18px;
++    border-radius: 20px;
++    margin-bottom: 18px;
++    background: ${({ $bg }) => $bg};
++    border: 2px solid transparent;
++    background-clip: padding-box;
++    box-shadow: inset 0 0 0 2px ${brandColors.purple}33;
++`;
++
++const HelpRow = styled.div`
++    display: flex;
++    flex-wrap: wrap;
++    gap: 8px;
++    margin-top: 8px;
++`;
+ 
+ export const Home = () => {
+     const { t } = useTranslation();
++    const { token } = useToken();
+     const navigate = useNavigate();
+     const { newVersionAvailable, isDevelopVersion, latestDevelopSHA, latestReleaseVersion } =
+         useTeddyCloudVersion();
+@@ -32,22 +195,199 @@ export const Home = () => {
+         accessApiEnabled,
+         defaultLanguage,
+         loading,
+-        activeTab,
+-        setActiveTab,
+     } = useHomeData();
+ 
++    const libraryCount = useLibraryCount();
++    const [setupDismissed, setSetupDismissed] = useState(() => {
++        try {
++            return localStorage.getItem(SETUP_DISMISSED_KEY) === "1";
++        } catch {
++            return false;
++        }
++    });
++
++    const tagTonies = useMemo(() => tonies.filter((tonie) => tonie.type === "tag"), [tonies]);
++    const setup = useMemo(
++        () => computeSetup(tonieboxes.length, tonies, libraryCount ?? 0),
++        [tonieboxes.length, tonies, libraryCount],
++    );
++    const showSetupCard = !loading && libraryCount !== null && !setup.complete && !setupDismissed;
++
++    const dismissSetup = () => {
++        setSetupDismissed(true);
++        try {
++            localStorage.setItem(SETUP_DISMISSED_KEY, "1");
++        } catch {
++            /* private mode: just hide for this visit */
++        }
++    };
++
+     const boxesApiAccessDisabled: [string, boolean][] = accessApiEnabled.filter((item) => !item[1]);
+ 
+-    const newBoxesAllowedWarning = newBoxesAllowed ? (
++    const nextStepTitle: Record<string, string> = {
++        box: t("crewcloud.setup.box.title", "Connect your Toniebox"),
++        tonie: t("crewcloud.setup.tonie.title", "Put a tonie on your box"),
++        audio: t("crewcloud.setup.audio.title", "Add your own audio"),
++        assign: t("crewcloud.setup.assign.title", "Give a tonie your audio"),
++    };
++
++    const tiles: { key: string; icon: ReactNode; label: string; meta?: string; to: string }[] = [
++        {
++            key: "tonies",
++            icon: <TonieIcon />,
++            label: t("crewcloud.home.myTonies", "My tonies"),
++            meta: loading
++                ? undefined
++                : t("crewcloud.home.count", "{{count}} total", { count: tagTonies.length }),
++            to: "/tonies",
++        },
++        {
++            key: "library",
++            icon: <BookOutlined />,
++            label: t("crewcloud.more.library", "Library"),
++            meta:
++                libraryCount === null
++                    ? undefined
++                    : t("crewcloud.home.items", "{{count}} items", { count: libraryCount }),
++            to: "/tonies/library",
++        },
++        {
++            key: "boxes",
++            icon: <BoxIcon />,
++            label: t("crewcloud.nav.boxes", "Boxes"),
++            meta: loading
++                ? undefined
++                : t("crewcloud.home.connected", "{{count}} connected", {
++                      count: tonieboxes.length,
++                  }),
++            to: "/tonieboxes",
++        },
++        {
++            key: "player",
++            icon: <PlayCircleOutlined />,
++            label: t("crewcloud.more.player", "Audio player"),
++            meta: t("crewcloud.home.listenHere", "Listen here"),
++            to: "/tonies/audioplayer",
++        },
++    ];
++
++    return (
+         <>
+-            <Alert
+-                title={t("tonieboxes.newBoxesAllowed")}
+-                description={t("tonieboxes.newBoxesAllowedText")}
+-                type="warning"
+-                showIcon
+-                style={{ margin: "16px 0" }}
+-            />
+-            {boxesApiAccessDisabled.length > 0 && (
++            <Greeting>
++                <h1>{t("crewcloud.home.greeting", "Hi there! 👋")}</h1>
++                <div style={{ color: token.colorTextSecondary, fontSize: 17 }}>
++                    {t("crewcloud.home.subtitle", "What would you like to do today?")}
++                </div>
++            </Greeting>
++
++            {displayIncidentAlert ? (
++                <Alert
++                    title={t("security.alert")}
++                    description={t("security.incident_detected")}
++                    type="error"
++                    showIcon
++                    style={{ marginBottom: 16 }}
++                />
++            ) : null}
++
++            {showSetupCard && (
++                <SetupCard $bg={token.colorBgContainer} data-testid="home-setup-card">
++                    <Button
++                        type="text"
++                        size="small"
++                        icon={<CloseOutlined />}
++                        aria-label={t("crewcloud.home.hideSetup", "Hide")}
++                        onClick={dismissSetup}
++                        style={{ position: "absolute", top: 10, right: 10 }}
++                    />
++                    <div
++                        style={{ display: "flex", gap: 14, alignItems: "center", paddingRight: 28 }}
++                    >
++                        <RocketOutlined style={{ fontSize: 26, color: token.colorPrimary }} />
++                        <div style={{ flex: 1, minWidth: 0 }}>
++                            <div style={{ fontWeight: 800, fontSize: 17 }}>
++                                {t("crewcloud.home.finishSetup", "Finish setting up")}
++                            </div>
++                            <div style={{ color: token.colorTextSecondary }}>
++                                {t("crewcloud.setup.progress", "{{done}} of {{total}} steps done", {
++                                    done: setup.doneCount,
++                                    total: setup.total,
++                                })}
++                                {setup.nextStep
++                                    ? ` · ${t("crewcloud.home.next", "Next")}: ${nextStepTitle[setup.nextStep]}`
++                                    : ""}
++                            </div>
++                        </div>
++                    </div>
++                    <Progress
++                        percent={Math.round((setup.doneCount / setup.total) * 100)}
++                        showInfo={false}
++                        strokeColor={{ "0%": brandColors.pink, "100%": brandColors.purple }}
++                        style={{ margin: "12px 0" }}
++                    />
++                    <Button type="primary" size="large" block onClick={() => navigate("/setup")}>
++                        {t("crewcloud.home.continueSetup", "Continue setup")}
++                    </Button>
++                </SetupCard>
++            )}
++
++            <Actions>
++                <HeroAction
++                    onClick={() => navigate("/tonies/encoder")}
++                    data-testid="home-add-audio"
++                >
++                    <HeroIcon>
++                        <PlusOutlined />
++                    </HeroIcon>
++                    <span>
++                        <span
++                            style={{
++                                display: "block",
++                                fontWeight: 800,
++                                fontSize: 20,
++                                lineHeight: 1.2,
++                            }}
++                        >
++                            {t("crewcloud.home.addTitle", "Add audio to a tonie")}
++                        </span>
++                        <span style={{ display: "block", opacity: 0.92, marginTop: 4 }}>
++                            {t("crewcloud.home.addText", "Songs, stories or your own recordings")}
++                        </span>
++                    </span>
++                    <RightOutlined style={{ marginLeft: "auto", fontSize: 18, opacity: 0.9 }} />
++                </HeroAction>
++
++                {tiles.map((tile) => (
++                    <Tile
++                        key={tile.key}
++                        type="button"
++                        onClick={() => navigate(tile.to)}
++                        $bg={token.colorBgContainer}
++                        $border={token.colorBorderSecondary}
++                        $color={token.colorText}
++                        data-testid={`home-tile-${tile.key}`}
++                    >
++                        <TileIcon $bg={token.colorPrimaryBg} $color={token.colorPrimary}>
++                            {tile.icon}
++                        </TileIcon>
++                        <TileLabel>{tile.label}</TileLabel>
++                        {tile.meta ? (
++                            <TileMeta $color={token.colorTextSecondary}>{tile.meta}</TileMeta>
++                        ) : null}
++                    </Tile>
++                ))}
++            </Actions>
++
++            {newBoxesAllowed && (
++                <Alert
++                    title={t("tonieboxes.newBoxesAllowed")}
++                    description={t("tonieboxes.newBoxesAllowedText")}
++                    type="warning"
++                    showIcon
++                    style={{ marginBottom: 16 }}
++                />
++            )}
++            {newBoxesAllowed && boxesApiAccessDisabled.length > 0 && (
+                 <Alert
+                     title={t("tonieboxes.boxWithoutAPIAccess")}
+                     description={
+@@ -64,167 +404,133 @@ export const Home = () => {
+                     }
+                     type="info"
+                     showIcon
+-                    style={{ margin: "16px 0" }}
++                    style={{ marginBottom: 16 }}
+                 />
+             )}
+-        </>
+-    ) : null;
+-
+-    const newVersionHint = newVersionAvailable ? (
+-        <Alert
+-            title={t("teddycloud.newVersionAvailable")}
+-            description={
+-                <>
+-                    <Paragraph>
+-                        {isDevelopVersion
+-                            ? t("teddycloud.newVersionDetailsAvailableDevelop")
+-                            : t("teddycloud.newVersionDetailsAvailable")}{" "}
+-                    </Paragraph>
+-
+-                    <Link
+-                        to={
+-                            isDevelopVersion
+-                                ? gitHubTCCommitTreeBaseUrl + latestDevelopSHA
+-                                : gitHubTCReleasesUrl + "tag/" + latestReleaseVersion
+-                        }
+-                        target="_blank"
+-                        rel="noopener noreferrer"
+-                        style={{
+-                            display: "inline-flex",
+-                            alignItems: "center",
+-                            whiteSpace: "nowrap",
+-                        }}
+-                    >
+-                        {t("teddycloud.openNewVersionInGithub")}
++
++            {newVersionAvailable && (
++                <Alert
++                    title={t("teddycloud.newVersionAvailable")}
++                    description={
++                        <Link
++                            to={
++                                isDevelopVersion
++                                    ? gitHubTCCommitTreeBaseUrl + latestDevelopSHA
++                                    : gitHubTCReleasesUrl + "tag/" + latestReleaseVersion
++                            }
++                            target="_blank"
++                            rel="noopener noreferrer"
++                        >
++                            {t("teddycloud.openNewVersionInGithub")} <ExportOutlined />
++                        </Link>
++                    }
++                    type="info"
++                    showIcon
++                    style={{ marginBottom: 16 }}
++                />
++            )}
++
++            <SectionHead>
++                <h2>{t("home.yourTonies")}</h2>
++                {tagTonies.length > 0 && (
++                    <Link to="/tonies" style={{ fontWeight: 700, whiteSpace: "nowrap" }}>
++                        {t("crewcloud.home.seeAll", "See all ({{count}})", {
++                            count: tagTonies.length,
++                        })}{" "}
++                        <RightOutlined />
+                     </Link>
+-                </>
+-            }
+-            type="info"
+-            showIcon
+-            style={{ margin: "16px 0" }}
+-        />
+-    ) : null;
+-
+-    const toniesTab = (
+-        <>
++                )}
++            </SectionHead>
+             {loading ? (
+                 <LoadingSpinner />
++            ) : tagTonies.length > 0 ? (
++                <div style={{ marginBottom: 26 }}>
++                    <ToniesList
++                        tonieCards={tagTonies.filter((tonie) => tonie.tonieInfo.series).slice(0, 6)}
++                        overlay=""
++                        showFilter={false}
++                        showPagination={false}
++                        readOnly={true}
++                        defaultLanguage={defaultLanguage}
++                    />
++                </div>
+             ) : (
+-                <ToniesList
+-                    tonieCards={tonies
+-                        .filter((tonie) => tonie.type === "tag" && tonie.tonieInfo.series)
+-                        .slice(0, 6)}
+-                    overlay=""
+-                    showFilter={false}
+-                    showPagination={false}
+-                    readOnly={true}
+-                    defaultLanguage={defaultLanguage}
+-                />
++                <EmptyCard $bg={token.colorFillQuaternary} $border={token.colorBorder}>
++                    <div style={{ fontWeight: 800, marginBottom: 4 }}>
++                        {t("crewcloud.home.noToniesTitle", "No tonies yet")}
++                    </div>
++                    <div style={{ color: token.colorTextSecondary, marginBottom: 12 }}>
++                        {t(
++                            "crewcloud.home.noToniesText",
++                            "Tonies appear here after you put them on a box that's connected to {{brand}}.",
++                            { brand: BRAND_NAME },
++                        )}
++                    </div>
++                    <Button onClick={() => navigate("/setup")}>
++                        {t("crewcloud.more.setup", "Setup guide")}
++                    </Button>
++                </EmptyCard>
+             )}
+-            <Paragraph style={{ marginTop: 16 }}>
+-                <Button onClick={() => navigate("/tonies")}>
+-                    {t("home.toAllYourTonies")} (
+-                    {tonies.filter((tonie) => tonie.type === "tag").length})
+-                </Button>
+-            </Paragraph>
+-        </>
+-    );
+ 
+-    const tonieboxesTab = (
+-        <>
++            <SectionHead>
++                <h2>{t("home.yourTonieboxes")}</h2>
++                {tonieboxes.length > 0 && (
++                    <Link to="/tonieboxes" style={{ fontWeight: 700, whiteSpace: "nowrap" }}>
++                        {t("crewcloud.home.seeAll", "See all ({{count}})", {
++                            count: tonieboxes.length,
++                        })}{" "}
++                        <RightOutlined />
++                    </Link>
++                )}
++            </SectionHead>
+             {loading ? (
+                 <LoadingSpinner />
++            ) : tonieboxes.length > 0 ? (
++                <div style={{ marginBottom: 26 }}>
++                    <TonieboxesList tonieboxCards={tonieboxes.slice(0, 4)} readOnly={true} />
++                </div>
+             ) : (
+-                <TonieboxesList tonieboxCards={tonieboxes.slice(0, 4)} readOnly={true} />
++                <EmptyCard $bg={token.colorFillQuaternary} $border={token.colorBorder}>
++                    <div style={{ fontWeight: 800, marginBottom: 4 }}>
++                        {t("crewcloud.home.noBoxesTitle", "No box connected yet")}
++                    </div>
++                    <div style={{ color: token.colorTextSecondary, marginBottom: 12 }}>
++                        {t(
++                            "crewcloud.home.noBoxesText",
++                            "Connect your Toniebox once and it will fetch your audio from {{brand}}.",
++                            { brand: BRAND_NAME },
++                        )}
++                    </div>
++                    <Button type="primary" onClick={() => navigate("/tonieboxes/boxsetup")}>
++                        {t("crewcloud.setup.box.cta", "Open the box guide")}
++                    </Button>
++                </EmptyCard>
+             )}
+-            <Paragraph style={{ marginTop: 16 }}>
+-                <Button onClick={() => navigate("/tonieboxes")}>
+-                    {t("home.toAllYourTonieboxes")} ({tonieboxes.length})
+-                </Button>
+-            </Paragraph>
+-        </>
+-    );
+-
+-    const toniesAndTonieboxes: TabsProps["items"] = [
+-        {
+-            key: "tonies",
+-            label: <h2 style={{ marginBottom: 0 }}>{t("home.yourTonies")}</h2>,
+-            children: toniesTab,
+-        },
+-        {
+-            key: "tonieboxes",
+-            label: <h2 style={{ marginBottom: 0 }}>{t("home.yourTonieboxes")}</h2>,
+-            children: tonieboxesTab,
+-        },
+-    ];
+-
+-    return (
+-        <>
+-            <Paragraph>
+-                <h1>{t("home.title")}</h1>
+-                {displayIncidentAlert ? (
+-                    <Alert
+-                        title={t("security.alert")}
+-                        description={t("security.incident_detected")}
+-                        type="error"
+-                        showIcon
+-                        style={{ margin: "16px 0" }}
+-                    />
+-                ) : null}
+-                {t("home.intro")}
+-                {newBoxesAllowedWarning}
+-            </Paragraph>
+-
+-            {newVersionHint}
+-
+-            <Paragraph>
+-                {t("home.forumIntroPart1")}
+-                <Link to={forumUrl} target="_blank" rel="noopener noreferrer">
+-                    {forumUrl} {<ExportOutlined />}
+-                </Link>
+-                {t("home.forumIntroPart2")}
+-            </Paragraph>
+-
+-            <Paragraph>
+-                <Tabs
+-                    onChange={(newKey) => setActiveTab(newKey)}
+-                    activeKey={activeTab}
+-                    items={toniesAndTonieboxes}
+-                    indicator={{ size: (origin) => origin - 20, align: "center" }}
+-                />
+-            </Paragraph>
+ 
+-            <Paragraph>
+-                <h2>{t("home.helpfulLinks")}</h2>
+-                <ul>
+-                    <li>
+-                        <Link to="/community/faq">FAQ</Link>
+-                    </li>
+-                    <li>
+-                        <Link
+-                            to={gitHubUrl}
+-                            target="_blank"
+-                            rel="noopener noreferrer                  >    "
+-                        >
+-                            GitHub {<ExportOutlined />}
+-                        </Link>
+-                    </li>
+-                    <li>
+-                        <Link to={telegramGroupUrl} target="_blank" rel="noopener noreferrer">
+-                            Telegram Chat {<ExportOutlined />}
+-                        </Link>
+-                    </li>
+-                    <li>
+-                        <Link to={forumUrl} target="_blank" rel="noopener noreferrer">
+-                            Discourse Forum {<ExportOutlined />}
+-                        </Link>
+-                    </li>
+-                    <li>
+-                        <Link to={wikiUrl} target="_blank" rel="noopener noreferrer">
+-                            TeddyCloud Wiki {<ExportOutlined />}
+-                        </Link>
+-                    </li>
+-                </ul>
++            <Paragraph style={{ marginBottom: 0 }}>
++                <h3 style={{ marginBottom: 8 }}>
++                    <QuestionCircleOutlined style={{ color: token.colorPrimary, marginRight: 8 }} />
++                    {t("crewcloud.home.help", "Need help?")}
++                </h3>
++                <HelpRow>
++                    <Button onClick={() => navigate("/community/faq")}>FAQ</Button>
++                    <Button
++                        href={forumUrl}
++                        target="_blank"
++                        rel="noopener noreferrer"
++                        icon={<ExportOutlined />}
++                    >
++                        {t("crewcloud.home.forum", "Community forum")}
++                    </Button>
++                    <Button
++                        href={wikiUrl}
++                        target="_blank"
++                        rel="noopener noreferrer"
++                        icon={<ExportOutlined />}
++                    >
++                        {t("crewcloud.home.wiki", "{{upstream}} wiki", { upstream: UPSTREAM_NAME })}
++                    </Button>
++                </HelpRow>
+             </Paragraph>
+         </>
+     );
+diff --git a/src/components/setup/SetupGuide.tsx b/src/components/setup/SetupGuide.tsx
+new file mode 100644
+index 0000000..caf3748
+--- /dev/null
++++ b/src/components/setup/SetupGuide.tsx
+@@ -0,0 +1,373 @@
++import { ReactNode, useState } from "react";
++import { useNavigate } from "react-router-dom";
++import { useTranslation } from "react-i18next";
++import styled from "styled-components";
++import { Button, Progress, Skeleton, Switch, message, theme } from "antd";
++import {
++    CheckCircleFilled,
++    CloudServerOutlined,
++    CustomerServiceOutlined,
++    PlusOutlined,
++    SoundOutlined,
++} from "@ant-design/icons";
++
++import { BoxIcon, TonieIcon } from "../common/icons/CrewIcons";
++import { BRAND_NAME, brandColors } from "../../crewcloud/brand";
++import { SetupStepKey, useSetupStatus } from "./useSetupStatus";
++
++const { useToken } = theme;
++
++const Hero = styled.div`
++    display: flex;
++    align-items: center;
++    gap: 18px;
++    margin-bottom: 18px;
++`;
++
++const Steps = styled.ol`
++    list-style: none;
++    margin: 0;
++    padding: 0;
++    display: flex;
++    flex-direction: column;
++    gap: 12px;
++`;
++
++const StepCard = styled.li<{ $bg: string; $border: string; $active: boolean; $accent: string }>`
++    display: flex;
++    gap: 14px;
++    padding: 16px;
++    border-radius: 18px;
++    background: ${({ $bg }) => $bg};
++    border: ${({ $active, $accent, $border }) => ($active ? `2px solid ${$accent}` : `1px solid ${$border}`)};
++`;
++
++const StepIcon = styled.div<{ $bg: string; $color: string }>`
++    flex: none;
++    width: 44px;
++    height: 44px;
++    border-radius: 14px;
++    display: grid;
++    place-items: center;
++    font-size: 22px;
++    background: ${({ $bg }) => $bg};
++    color: ${({ $color }) => $color};
++`;
++
++const StepBody = styled.div`
++    flex: 1;
++    min-width: 0;
++`;
++
++const StepTitle = styled.div`
++    font-weight: 800;
++    font-size: 17px;
++    line-height: 1.3;
++    display: flex;
++    align-items: center;
++    gap: 8px;
++    flex-wrap: wrap;
++`;
++
++const StepText = styled.div<{ $color: string }>`
++    color: ${({ $color }) => $color};
++    margin: 4px 0 10px;
++    line-height: 1.5;
++`;
++
++const ToggleRow = styled.label<{ $border: string }>`
++    display: flex;
++    align-items: flex-start;
++    justify-content: space-between;
++    gap: 14px;
++    padding: 12px 0;
++    border-top: 1px solid ${({ $border }) => $border};
++    cursor: pointer;
++    &:first-of-type {
++        border-top: 0;
++    }
++`;
++
++const stepIcons: Record<SetupStepKey, ReactNode> = {
++    server: <CloudServerOutlined />,
++    box: <BoxIcon />,
++    tonie: <TonieIcon />,
++    audio: <PlusOutlined />,
++    assign: <SoundOutlined />,
++};
++
++export const SetupGuide = () => {
++    const { t } = useTranslation();
++    const { token } = useToken();
++    const navigate = useNavigate();
++    const status = useSetupStatus();
++    const [saving, setSaving] = useState<string | null>(null);
++
++    const toggle = async (key: string, value: boolean) => {
++        setSaving(key);
++        try {
++            await status.setBoolSetting(key, value);
++            message.success(t("crewcloud.setup.saved", "Saved"));
++        } catch (e) {
++            message.error(t("crewcloud.setup.saveFailed", "Couldn't save that setting") + `: ${e}`);
++        } finally {
++            setSaving(null);
++        }
++    };
++
++    const useRecommended = async () => {
++        setSaving("recommended");
++        try {
++            if (status.normalize === false) await status.setBoolSetting("encode.normalize", true);
++            if (status.useFrontend === false)
++                await status.setBoolSetting("encode.use_frontend", true);
++            message.success(t("crewcloud.setup.saved", "Saved"));
++        } catch (e) {
++            message.error(t("crewcloud.setup.saveFailed", "Couldn't save that setting") + `: ${e}`);
++        } finally {
++            setSaving(null);
++        }
++    };
++
++    const stepText: Record<
++        SetupStepKey,
++        { title: string; text: string; cta?: string; to?: string }
++    > = {
++        server: {
++            title: t("crewcloud.setup.server.title", "{{brand}} is running", { brand: BRAND_NAME }),
++            text: t("crewcloud.setup.server.text", "Your server is up and this page can reach it."),
++        },
++        box: {
++            title: t("crewcloud.setup.box.title", "Connect your Toniebox"),
++            text: t(
++                "crewcloud.setup.box.text",
++                "Point your box at {{brand}} so it can fetch your audio. The guide walks you through it for your box model.",
++                { brand: BRAND_NAME },
++            ),
++            cta: t("crewcloud.setup.box.cta", "Open the box guide"),
++            to: "/tonieboxes/boxsetup",
++        },
++        tonie: {
++            title: t("crewcloud.setup.tonie.title", "Put a tonie on your box"),
++            text: t(
++                "crewcloud.setup.tonie.text",
++                "Once your box is connected, every tonie you put on it shows up here.",
++            ),
++            cta: t("crewcloud.setup.tonie.cta", "See my tonies"),
++            to: "/tonies",
++        },
++        audio: {
++            title: t("crewcloud.setup.audio.title", "Add your own audio"),
++            text: t(
++                "crewcloud.setup.audio.text",
++                "Upload stories, songs or recordings. {{brand}} converts them for the box.",
++                { brand: BRAND_NAME },
++            ),
++            cta: t("crewcloud.nav.add", "Add audio"),
++            to: "/tonies/encoder",
++        },
++        assign: {
++            title: t("crewcloud.setup.assign.title", "Give a tonie your audio"),
++            text: t(
++                "crewcloud.setup.assign.text",
++                "Right after adding audio you can pick the tonie that plays it. Or open a tonie and choose your audio as its source.",
++            ),
++            cta: t("crewcloud.setup.assign.cta", "Choose a tonie"),
++            to: "/tonies",
++        },
++    };
++
++    if (status.loading) {
++        return <Skeleton active paragraph={{ rows: 8 }} />;
++    }
++
++    const percent = Math.round((status.doneCount / status.total) * 100);
++
++    return (
++        <div>
++            <Hero>
++                <Progress
++                    type="circle"
++                    size={84}
++                    percent={percent}
++                    strokeColor={{ "0%": brandColors.pink, "100%": brandColors.purple }}
++                    format={() => (
++                        <span style={{ fontWeight: 800, fontSize: 18 }}>
++                            {status.doneCount}/{status.total}
++                        </span>
++                    )}
++                />
++                <div>
++                    <h1 style={{ margin: 0 }}>
++                        {status.complete
++                            ? t("crewcloud.setup.doneTitle", "You're all set! 🎉")
++                            : t("crewcloud.setup.title", "Let's get {{brand}} ready", {
++                                  brand: BRAND_NAME,
++                              })}
++                    </h1>
++                    <div style={{ color: token.colorTextSecondary, marginTop: 4 }}>
++                        {status.complete
++                            ? t(
++                                  "crewcloud.setup.doneText",
++                                  "Every step is done. Enjoy your tonies!",
++                              )
++                            : t("crewcloud.setup.progress", "{{done}} of {{total}} steps done", {
++                                  done: status.doneCount,
++                                  total: status.total,
++                              })}
++                    </div>
++                </div>
++            </Hero>
++
++            <Steps>
++                {status.steps.map((step, index) => {
++                    const info = stepText[step.key];
++                    const isNext = step.key === status.nextStep;
++                    return (
++                        <StepCard
++                            key={step.key}
++                            $bg={token.colorBgContainer}
++                            $border={token.colorBorderSecondary}
++                            $active={isNext}
++                            $accent={token.colorPrimary}
++                            data-testid={`setup-step-${step.key}`}
++                        >
++                            <StepIcon
++                                $bg={step.done ? "rgba(63,191,154,.15)" : token.colorFillQuaternary}
++                                $color={step.done ? brandColors.mint : token.colorPrimary}
++                            >
++                                {step.done ? <CheckCircleFilled /> : stepIcons[step.key]}
++                            </StepIcon>
++                            <StepBody>
++                                <StepTitle>
++                                    <span
++                                        style={{ color: token.colorTextTertiary, fontWeight: 700 }}
++                                    >
++                                        {index + 1}.
++                                    </span>
++                                    {info.title}
++                                </StepTitle>
++                                <StepText $color={token.colorTextSecondary}>{info.text}</StepText>
++
++                                {step.key === "box" &&
++                                    status.allowNewBox !== null &&
++                                    !step.done && (
++                                        <ToggleRow $border={token.colorBorderSecondary}>
++                                            <span>
++                                                <b>
++                                                    {t(
++                                                        "crewcloud.setup.allowNewBox",
++                                                        "Let a new box register",
++                                                    )}
++                                                </b>
++                                                <div
++                                                    style={{
++                                                        color: token.colorTextSecondary,
++                                                        fontSize: 14,
++                                                    }}
++                                                >
++                                                    {t(
++                                                        "crewcloud.setup.allowNewBoxHint",
++                                                        "Turn this on while you connect your box, then off again.",
++                                                    )}
++                                                </div>
++                                            </span>
++                                            <Switch
++                                                checked={status.allowNewBox}
++                                                loading={saving === "core.allowNewBox"}
++                                                onChange={(v) => toggle("core.allowNewBox", v)}
++                                            />
++                                        </ToggleRow>
++                                    )}
++
++                                {info.cta && info.to && !step.done && (
++                                    <Button
++                                        type={isNext ? "primary" : "default"}
++                                        size="large"
++                                        onClick={() => navigate(info.to!)}
++                                        block
++                                        style={{ maxWidth: 360 }}
++                                    >
++                                        {info.cta}
++                                    </Button>
++                                )}
++                            </StepBody>
++                        </StepCard>
++                    );
++                })}
++            </Steps>
++
++            {(status.normalize !== null || status.useFrontend !== null) && (
++                <div
++                    style={{
++                        marginTop: 22,
++                        padding: 16,
++                        borderRadius: 18,
++                        border: `1px solid ${token.colorBorderSecondary}`,
++                        background: token.colorBgContainer,
++                    }}
++                    data-testid="setup-recommended"
++                >
++                    <h3 style={{ marginTop: 0, display: "flex", gap: 8, alignItems: "center" }}>
++                        <CustomerServiceOutlined style={{ color: token.colorPrimary }} />
++                        {t("crewcloud.setup.recommended", "Recommended settings")}
++                    </h3>
++                    {status.normalize !== null && (
++                        <ToggleRow $border={token.colorBorderSecondary}>
++                            <span>
++                                <b>{t("crewcloud.setup.normalize", "Even out the volume")}</b>
++                                <div style={{ color: token.colorTextSecondary, fontSize: 14 }}>
++                                    {t(
++                                        "crewcloud.setup.normalizeHint",
++                                        "Quiet and loud recordings end up at a similar volume on the box.",
++                                    )}
++                                </div>
++                            </span>
++                            <Switch
++                                checked={status.normalize}
++                                loading={saving === "encode.normalize"}
++                                onChange={(v) => toggle("encode.normalize", v)}
++                            />
++                        </ToggleRow>
++                    )}
++                    {status.useFrontend !== null && (
++                        <ToggleRow $border={token.colorBorderSecondary}>
++                            <span>
++                                <b>
++                                    {t(
++                                        "crewcloud.setup.browserEncode",
++                                        "Convert audio in the browser",
++                                    )}
++                                </b>
++                                <div style={{ color: token.colorTextSecondary, fontSize: 14 }}>
++                                    {t(
++                                        "crewcloud.setup.browserEncodeHint",
++                                        "Uploads are many times smaller, which is quicker on mobile data.",
++                                    )}
++                                </div>
++                            </span>
++                            <Switch
++                                checked={status.useFrontend}
++                                loading={saving === "encode.use_frontend"}
++                                onChange={(v) => toggle("encode.use_frontend", v)}
++                            />
++                        </ToggleRow>
++                    )}
++                    {(status.normalize === false || status.useFrontend === false) && (
++                        <Button
++                            type="primary"
++                            size="large"
++                            block
++                            style={{ marginTop: 8, maxWidth: 360 }}
++                            loading={saving === "recommended"}
++                            onClick={useRecommended}
++                            data-testid="setup-use-recommended"
++                        >
++                            {t("crewcloud.setup.useRecommended", "Use recommended settings")}
++                        </Button>
++                    )}
++                </div>
++            )}
++        </div>
++    );
++};
+diff --git a/src/components/setup/useSetupStatus.ts b/src/components/setup/useSetupStatus.ts
+new file mode 100644
+index 0000000..324147a
+--- /dev/null
++++ b/src/components/setup/useSetupStatus.ts
+@@ -0,0 +1,118 @@
++import { useCallback, useEffect, useMemo, useState } from "react";
++import { TeddyCloudApi } from "../../api";
++import { defaultAPIConfig } from "../../config/defaultApiConfig";
++import { useTonieboxes } from "../../hooks/useTonieboxes";
++import { useTonies } from "../../hooks/useTonies";
++import { TonieCardProps } from "../../types/tonieTypes";
++
++const api = new TeddyCloudApi(defaultAPIConfig());
++
++export type SetupStepKey = "server" | "box" | "tonie" | "audio" | "assign";
++
++export interface SetupStep {
++    key: SetupStepKey;
++    done: boolean;
++}
++
++/** Reads a boolean setting. Returns null when the server doesn't have that setting. */
++const readBool = async (key: string): Promise<boolean | null> => {
++    try {
++        const response = await api.apiGetTeddyCloudSettingRaw(key);
++        return (await response.text()).trim().toLowerCase() === "true";
++    } catch {
++        return null;
++    }
++};
++
++/**
++ * Works out setup progress from data the server already has: a connected box, tonies seen by it,
++ * audio in the library, and a tonie that plays custom audio. Pure, so pages that already loaded
++ * boxes and tonies (like Home) don't need to fetch them again.
++ */
++export const computeSetup = (boxCount: number, tonies: TonieCardProps[], libraryCount: number) => {
++    const tags = tonies.filter((t) => t.type === "tag");
++    const steps: SetupStep[] = [
++        { key: "server", done: true },
++        { key: "box", done: boxCount > 0 },
++        { key: "tonie", done: tags.length > 0 },
++        { key: "audio", done: libraryCount > 0 },
++        { key: "assign", done: tags.some((t) => !!t.source && t.source.trim() !== "") },
++    ];
++    const doneCount = steps.filter((s) => s.done).length;
++    return {
++        steps,
++        doneCount,
++        total: steps.length,
++        complete: doneCount === steps.length,
++        nextStep: steps.find((s) => !s.done)?.key,
++    };
++};
++
++/** Number of entries in the library root (null while loading). */
++export const useLibraryCount = () => {
++    const [count, setCount] = useState<number | null>(null);
++    useEffect(() => {
++        (async () => {
++            try {
++                const response = await api.apiGetTeddyCloudApiRaw(
++                    "/api/fileIndexV2?path=&special=library",
++                );
++                const json = await response.json();
++                const entries = Array.isArray(json?.files) ? json.files : [];
++                setCount(entries.filter((f: { name?: string }) => f?.name !== "..").length);
++            } catch {
++                setCount(0);
++            }
++        })();
++    }, []);
++    return count;
++};
++
++/** Full status for the setup page, including the settings it can switch. */
++export const useSetupStatus = () => {
++    const { tonieboxes, loading: loadingBoxes } = useTonieboxes();
++    const { tonies, loading: loadingTonies } = useTonies({ merged: false, filter: "tag" });
++    const libraryCount = useLibraryCount();
++
++    const [allowNewBox, setAllowNewBox] = useState<boolean | null>(null);
++    const [normalize, setNormalize] = useState<boolean | null>(null);
++    const [useFrontend, setUseFrontend] = useState<boolean | null>(null);
++
++    const refreshSettings = useCallback(async () => {
++        const [a, n, f] = await Promise.all([
++            readBool("core.allowNewBox"),
++            readBool("encode.normalize"),
++            readBool("encode.use_frontend"),
++        ]);
++        setAllowNewBox(a);
++        setNormalize(n);
++        setUseFrontend(f);
++    }, []);
++
++    useEffect(() => {
++        refreshSettings();
++    }, [refreshSettings]);
++
++    /** Writes a boolean setting and re-reads it, so the UI reflects what the server stored. */
++    const setBoolSetting = useCallback(
++        async (key: string, value: boolean) => {
++            await api.apiPostTeddyCloudSetting(key, value);
++            await refreshSettings();
++        },
++        [refreshSettings],
++    );
++
++    const setup = useMemo(
++        () => computeSetup(tonieboxes.length, tonies, libraryCount ?? 0),
++        [tonieboxes.length, tonies, libraryCount],
++    );
++
++    return {
++        ...setup,
++        loading: loadingBoxes || loadingTonies || libraryCount === null,
++        allowNewBox,
++        normalize,
++        useFrontend,
++        setBoolSetting,
++    };
++};
+diff --git a/src/components/tonies/tonieslist/ToniesList.tsx b/src/components/tonies/tonieslist/ToniesList.tsx
+index 8e7a741..886b94d 100644
+--- a/src/components/tonies/tonieslist/ToniesList.tsx
++++ b/src/components/tonies/tonieslist/ToniesList.tsx
+@@ -85,17 +85,7 @@ export const ToniesList: React.FC<{
+ 
+     const toniesListRef = useRef<HTMLDivElement | null>(null);
+ 
+-    const columns = screens.xxl
+-        ? 6
+-        : screens.xl
+-          ? 4
+-          : screens.lg
+-            ? 3
+-            : screens.md
+-              ? 2
+-              : screens.sm
+-                ? 2
+-                : 1;
++    const columns = screens.xxl ? 6 : screens.xl ? 4 : screens.lg ? 3 : screens.md ? 2 : 2; // phones too: two per row instead of one screen-high card
+ 
+     // ------------------------
+     // Effects – basic wiring
+diff --git a/src/crewcloud/brand.ts b/src/crewcloud/brand.ts
+new file mode 100644
+index 0000000..30b753a
+--- /dev/null
++++ b/src/crewcloud/brand.ts
+@@ -0,0 +1,34 @@
++/**
++ * CrewCloud brand constants.
++ *
++ * CrewCloud is a friendlier, mobile-first edition of the open-source TeddyCloud web UI.
++ * The product name shown to people is BRAND_NAME; UPSTREAM_NAME is kept for honest
++ * attribution (TeddyCloud is GPL-licensed) and for places that link to the upstream
++ * project's wiki, forum, releases and support channels.
++ */
++export const BRAND_NAME = "CrewCloud";
++export const UPSTREAM_NAME = "TeddyCloud";
++
++export const brandColors = {
++    pink: "#ff8fab",
++    purple: "#8b6df2",
++    purpleDeep: "#6f54d6",
++    purpleSoft: "#f1ecfe",
++    gold: "#ffd166",
++    ink: "#3a2f5b",
++    mint: "#3fbf9a",
++} as const;
++
++export const brandGradient = "linear-gradient(135deg, #ff8fab 0%, #8b6df2 100%)";
++export const brandGradientDark = "linear-gradient(135deg, #a8577a 0%, #5b43bd 100%)";
++
++export const fontBody =
++    '"Nunito Variable", "Nunito", ui-rounded, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, system-ui, sans-serif';
++export const fontDisplay =
++    '"Fredoka Variable", "Fredoka", "Nunito Variable", ui-rounded, -apple-system, "Segoe UI", system-ui, sans-serif';
++
++/** The breakpoint below which the phone layout (tab bar, bottom sheets) is used. */
++export const MOBILE_MAX_WIDTH = 767;
++
++/** Height of the bottom tab bar on phones, without the device safe-area inset. */
++export const TAB_BAR_HEIGHT = 64;
+diff --git a/src/crewcloud/crewcloud.css b/src/crewcloud/crewcloud.css
+new file mode 100644
+index 0000000..8864322
+--- /dev/null
++++ b/src/crewcloud/crewcloud.css
+@@ -0,0 +1,127 @@
++/* CrewCloud global styles: brand typography plus phone-friendly defaults that apply to every
++   page, so individual screens don't each need their own mobile fixes. */
++
++body {
++    font-family:
++        "Nunito Variable",
++        "Nunito",
++        ui-rounded,
++        -apple-system,
++        BlinkMacSystemFont,
++        "Segoe UI",
++        Roboto,
++        system-ui,
++        sans-serif;
++    -webkit-tap-highlight-color: transparent;
++}
++
++h1,
++h2,
++h3,
++h4,
++.ant-typography h1,
++.ant-typography h2,
++.ant-typography h3,
++.ant-modal-title,
++.ant-drawer-title,
++.crew-display {
++    font-family:
++        "Fredoka Variable", "Fredoka", "Nunito Variable", ui-rounded, system-ui, sans-serif;
++    font-weight: 600;
++    letter-spacing: 0.1px;
++}
++
++/* matrix easter egg keeps its monospace look */
++body.matrix-theme,
++body.matrix-theme h1,
++body.matrix-theme h2,
++body.matrix-theme h3 {
++    font-family: inherit;
++}
++
++/* bottom sheets used for navigation on phones */
++.crew-sheet .ant-drawer-content {
++    border-radius: 22px 22px 0 0;
++}
++.crew-sheet .ant-drawer-header {
++    border-bottom: 0;
++    padding-bottom: 4px;
++}
++.crew-sheet .ant-drawer-body {
++    padding-top: 4px;
++    padding-bottom: calc(16px + env(safe-area-inset-bottom));
++}
++.crew-sheet .ant-menu {
++    border-inline-end: 0 !important;
++    background: transparent;
++}
++
++@media (max-width: 767px) {
++    /* 16px inputs stop iOS Safari from zooming the page when a field is focused */
++    input,
++    textarea,
++    select,
++    .ant-input,
++    .ant-input-affix-wrapper input,
++    .ant-select-selection-search-input,
++    .ant-select-selection-item,
++    .ant-input-number-input,
++    .ant-picker-input > input {
++        font-size: 16px !important;
++    }
++
++    h1 {
++        font-size: 28px;
++        line-height: 1.2;
++        margin: 4px 0 12px;
++    }
++    h2 {
++        font-size: 22px;
++        line-height: 1.25;
++    }
++    h3 {
++        font-size: 19px;
++    }
++
++    /* breadcrumbs duplicate the section bar on phones and cost a whole row */
++    .crew-breadcrumb {
++        display: none !important;
++    }
++
++    /* dialogs use (almost) the whole phone screen instead of a narrow floating box */
++    .ant-modal {
++        max-width: calc(100vw - 16px) !important;
++        margin: 8px auto !important;
++        top: 8px !important;
++        padding-bottom: 8px !important;
++    }
++    .ant-modal .ant-modal-content {
++        padding: 18px 16px;
++        border-radius: 20px;
++    }
++
++    /* wide tables scroll sideways inside their card instead of breaking the page */
++    .ant-table-wrapper {
++        overflow-x: auto;
++        -webkit-overflow-scrolling: touch;
++    }
++
++    /* upload drop zones: a big, obvious tap target */
++    .ant-upload-wrapper .ant-upload-drag {
++        border-radius: 18px;
++    }
++    .ant-upload-wrapper .ant-upload-drag .ant-upload {
++        padding: 28px 12px;
++    }
++
++    /* notifications sit above the tab bar instead of covering the header */
++    .ant-notification-bottom {
++        margin-bottom: calc(72px + env(safe-area-inset-bottom)) !important;
++    }
++
++    /* tidy lists and descriptions on narrow screens */
++    .ant-descriptions-item-label,
++    .ant-descriptions-item-content {
++        font-size: 15px;
++    }
++}
+diff --git a/src/crewcloud/theme.ts b/src/crewcloud/theme.ts
+new file mode 100644
+index 0000000..a61f288
+--- /dev/null
++++ b/src/crewcloud/theme.ts
+@@ -0,0 +1,86 @@
++import type { ThemeConfig } from "antd";
++import { brandColors, fontBody } from "./brand";
++
++type Mode = "light" | "dark" | "matrix";
++
++/**
++ * The CrewCloud Ant Design theme.
++ *
++ * Phones get a larger base font (16px, which also stops iOS from zooming into inputs) and
++ * 44px+ touch targets, following platform guidance for comfortable tapping. The matrix easter-egg
++ * theme keeps its own colours, so brand colours are only applied to light and dark.
++ */
++export const buildCrewTheme = (
++    mode: Mode,
++    isMobile: boolean,
++    algorithm: ThemeConfig["algorithm"],
++): ThemeConfig => {
++    const brand = mode !== "matrix";
++    const dark = mode === "dark";
++
++    return {
++        algorithm,
++        token: {
++            ...(brand
++                ? {
++                      colorPrimary: dark ? "#9d85f5" : brandColors.purple,
++                      colorLink: dark ? "#b3a1f8" : brandColors.purpleDeep,
++                      colorInfo: dark ? "#9d85f5" : brandColors.purple,
++                      colorBgLayout: dark ? "#120f22" : "#f7f3fb",
++                      colorBgContainer: dark ? "#1d1932" : "#ffffff",
++                      colorBgElevated: dark ? "#262142" : "#ffffff",
++                      colorBorderSecondary: dark ? "#2f2950" : "#efe8f7",
++                  }
++                : {}),
++            fontFamily: fontBody,
++            fontSize: isMobile ? 16 : 15,
++            fontSizeHeading1: isMobile ? 28 : 34,
++            fontSizeHeading2: isMobile ? 22 : 26,
++            fontSizeHeading3: isMobile ? 19 : 21,
++            fontSizeHeading4: isMobile ? 17 : 18,
++            lineHeight: 1.55,
++            borderRadius: isMobile ? 12 : 10,
++            borderRadiusLG: 18,
++            borderRadiusSM: 8,
++            controlHeight: isMobile ? 44 : 36,
++            controlHeightLG: isMobile ? 52 : 44,
++            controlHeightSM: isMobile ? 34 : 28,
++            wireframe: false,
++        },
++        components: {
++            // kept from the upstream theme
++            Slider: {
++                dotSize: 3,
++                handleSize: isMobile ? 10 : 6,
++                handleSizeHover: isMobile ? 12 : 8,
++                railSize: isMobile ? 6 : 4,
++            },
++            Popover: {
++                titleMinWidth: 0,
++            },
++            // CrewCloud
++            Button: {
++                fontWeight: 700,
++                primaryShadow: brand ? "0 6px 16px rgba(139, 109, 242, 0.28)" : undefined,
++            },
++            Menu: {
++                itemHeight: isMobile ? 50 : 40,
++                itemBorderRadius: 12,
++                iconSize: isMobile ? 18 : 16,
++                ...(brand && !dark
++                    ? {
++                          itemSelectedBg: brandColors.purpleSoft,
++                          itemSelectedColor: brandColors.purpleDeep,
++                      }
++                    : {}),
++            },
++            Card: {
++                borderRadiusLG: 18,
++            },
++            Tabs: {
++                titleFontSize: isMobile ? 16 : 15,
++            },
++            Switch: isMobile ? { trackHeight: 28, trackMinWidth: 50, handleSize: 24 } : {},
++        },
++    };
++};
+diff --git a/src/crewcloud/useIsMobile.ts b/src/crewcloud/useIsMobile.ts
+new file mode 100644
+index 0000000..3daf071
+--- /dev/null
++++ b/src/crewcloud/useIsMobile.ts
+@@ -0,0 +1,25 @@
++import { useEffect, useState } from "react";
++import { MOBILE_MAX_WIDTH } from "./brand";
++
++const query = `(max-width: ${MOBILE_MAX_WIDTH}px)`;
++
++const matches = () =>
++    typeof window !== "undefined" && typeof window.matchMedia === "function"
++        ? window.matchMedia(query).matches
++        : false;
++
++/** True on phone-sized screens. Updates live when the window is resized or rotated. */
++export const useIsMobile = (): boolean => {
++    const [isMobile, setIsMobile] = useState<boolean>(matches);
++
++    useEffect(() => {
++        if (typeof window.matchMedia !== "function") return;
++        const mql = window.matchMedia(query);
++        const onChange = () => setIsMobile(mql.matches);
++        onChange();
++        mql.addEventListener("change", onChange);
++        return () => mql.removeEventListener("change", onChange);
++    }, []);
++
++    return isMobile;
++};
+diff --git a/src/index.tsx b/src/index.tsx
+index 447ffc1..09b9a0c 100644
+--- a/src/index.tsx
++++ b/src/index.tsx
+@@ -1,5 +1,8 @@
+ import ReactDOM from "react-dom/client";
++import "@fontsource-variable/nunito";
++import "@fontsource-variable/fredoka";
+ import "./index.css";
++import "./crewcloud/crewcloud.css";
+ import "./i18n";
+ import App from "./App";
+ import React from "react";
+diff --git a/src/pages/setup/SetupPage.tsx b/src/pages/setup/SetupPage.tsx
+new file mode 100644
+index 0000000..c2c4894
+--- /dev/null
++++ b/src/pages/setup/SetupPage.tsx
+@@ -0,0 +1,33 @@
++import { Link } from "react-router-dom";
++import { useTranslation } from "react-i18next";
++
++import BreadcrumbWrapper, {
++    StyledContent,
++    StyledLayout,
++    StyledSider,
++} from "../../components/common/StyledComponents";
++import { HomeSubNav } from "../../components/home/HomeSubNav";
++import { SetupGuide } from "../../components/setup/SetupGuide";
++
++export const SetupPage = () => {
++    const { t } = useTranslation();
++
++    return (
++        <>
++            <StyledSider>
++                <HomeSubNav />
++            </StyledSider>
++            <StyledLayout>
++                <BreadcrumbWrapper
++                    items={[
++                        { title: <Link to="/">{t("home.navigationTitle")}</Link> },
++                        { title: t("crewcloud.more.setup", "Setup guide") },
++                    ]}
++                />
++                <StyledContent>
++                    <SetupGuide />
++                </StyledContent>
++            </StyledLayout>
++        </>
++    );
++};
+diff --git a/src/provider/TeddyCloudProvider.tsx b/src/provider/TeddyCloudProvider.tsx
+index 7bd4fac..3a602a0 100644
+--- a/src/provider/TeddyCloudProvider.tsx
++++ b/src/provider/TeddyCloudProvider.tsx
+@@ -28,6 +28,12 @@ import { generateUUID } from "../utils/ids/generateUUID";
+ 
+ const api = new TeddyCloudApi(defaultAPIConfig());
+ 
++/** Phones: toasts slide up above the tab bar instead of covering the header and page title. */
++const notificationPlacement = (): "bottom" | "topRight" =>
++    typeof window !== "undefined" && window.matchMedia?.("(max-width: 767px)").matches
++        ? "bottom"
++        : "topRight";
++
+ const NOTIFICATIONS_STORAGE_KEY = "notifications";
+ const MAX_STORED_NOTIFICATIONS = 500;
+ 
+@@ -258,7 +264,7 @@ export function TeddyCloudProvider({ children }: TeddyCloudProviderProps) {
+                     description,
+                     showProgress: true,
+                     pauseOnHover: true,
+-                    placement: "topRight",
++                    placement: notificationPlacement(),
+                 });
+             }, 0);
+         },
+@@ -274,7 +280,7 @@ export function TeddyCloudProvider({ children }: TeddyCloudProviderProps) {
+                     description,
+                     icon: <LoadingOutlined />,
+                     duration: 0,
+-                    placement: "topRight",
++                    placement: notificationPlacement(),
+                 });
+             }, 0);
+         },
+-- 
+2.43.0
+

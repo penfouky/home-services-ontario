@@ -1,3 +1,8 @@
+> **Superseded.** The admin UI is now the native **CrewCloud** web app
+> (`../teddycloud-fork/web/`), with its own theme, name and icons built in. Don't inject
+> `theme.css` / `brand.js` into the new web image: `brand.js` would retitle it "Colada Builds"
+> and clash with the new styles. This folder is kept for reference only.
+
 # Colada Builds theme for the TeddyCloud admin UI
 
 This makes the self-hosted TeddyCloud web interface at
