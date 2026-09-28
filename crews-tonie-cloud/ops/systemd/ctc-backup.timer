@@ -1,0 +1,11 @@
+[Unit]
+Description=Run the Crew's Tonie Cloud backup daily
+
+[Timer]
+# every day at 03:30, and catch up if the machine was off at the scheduled time
+OnCalendar=*-*-* 03:30:00
+Persistent=true
+RandomizedDelaySec=15m
+
+[Install]
+WantedBy=timers.target

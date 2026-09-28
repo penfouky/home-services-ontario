@@ -1,0 +1,492 @@
+diff --git a/include/settings.h b/include/settings.h
+index dd206d8..04a795f 100644
+--- a/include/settings.h
++++ b/include/settings.h
+@@ -110,6 +110,8 @@ typedef struct
+     uint32_t ffmpeg_sweep_delay_ms;
+     uint32_t stream_max_size;
+     bool use_frontend;
++    bool normalize;          /* Crew's Tonie Cloud: EBU R128 loudness leveling on server-side encode */
++    char *normalize_filter;  /* the ffmpeg loudnorm filter string to apply when normalize is on */
+ 
+ } settings_encode_t;
+ 
+diff --git a/src/settings.c b/src/settings.c
+index 03a7197..186cbad 100644
+--- a/src/settings.c
++++ b/src/settings.c
+@@ -290,6 +290,8 @@ static void option_map_init(uint8_t settingsId)
+     OPTION_UNSIGNED("encode.ffmpeg_sweep_delay_ms", &settings->encode.ffmpeg_sweep_delay_ms, 2000, 0, 10000, "Sweep delay ms", "Wait x ms until sweeping is stopped and stream is started. Delays stream start, but may increase success.", LEVEL_EXPERT)
+     OPTION_UNSIGNED("encode.stream_max_size", &settings->encode.stream_max_size, 1024 * 1024 * 40 * 6 - 1, 1024 * 1024 - 1, INT32_MAX, "Max stream filesize", "The box may create an empty file this length for each stream. So if you have 10 streaming tonies you use, the box may block 10*240MB. The only downside is, that the box will stop after the file is full and you'll need to replace the tag onto the box. Must not be a multiply of 4096, Default: 251.658.239, so 240MB, which means around 6h.", LEVEL_EXPERT)
+     OPTION_BOOL("encode.use_frontend", &settings->encode.use_frontend, TRUE, "Browser encoding", "Use browser-side encoding instead of server-side (requires modern browser with WebAssembly support)", LEVEL_DETAIL)
++    OPTION_BOOL("encode.normalize", &settings->encode.normalize, TRUE, "Level loudness", "Even out how loud converted audio is, so tonies don't jump between quiet and loud (server-side encode; EBU R128 via ffmpeg loudnorm)", LEVEL_DETAIL)
++    OPTION_STRING("encode.normalize_filter", &settings->encode.normalize_filter, "loudnorm=I=-16:TP=-1.5:LRA=11", "Loudness filter", "The ffmpeg audio filter applied when 'Level loudness' is on", LEVEL_EXPERT)
+ 
+     OPTION_TREE_DESC("frontend", "Frontend", LEVEL_BASIC)
+     OPTION_BOOL("frontend.split_model_content", &settings->frontend.split_model_content, TRUE, "Split content / model", "If enabled, the content of the TAF will be shown beside the model of the figurine", LEVEL_DETAIL)
+diff --git a/src/toniefile.c b/src/toniefile.c
+index 9f7904e..f51d1a6 100644
+--- a/src/toniefile.c
++++ b/src/toniefile.c
+@@ -44,6 +44,12 @@ struct toniefile_s
+     TonieboxAudioFileHeader taf;
+     Sha1Context sha1;
+     size_t taf_block_num;
++
++    /* Even-split page planning (Crew's Tonie Cloud fix): share each 4 KB block equally
++       among its frames instead of starving the last one. */
++    int plan_block;   /* taf_block_num the current plan was made for (-1 = none yet) */
++    int plan_total;   /* frames planned to fill this block */
++    int plan_used;    /* frames already emitted into this block */
+ };
+ 
+ static void toniefile_comment_add(uint8_t *buffer, size_t *length, const char *str)
+@@ -113,6 +119,7 @@ toniefile_t *toniefile_create(const char *fullPath, uint32_t audio_id, bool appe
+     ctx->taf.n_track_page_nums = 0;
+     ctx->taf.track_page_nums = osAllocMem(sizeof(uint32_t) * TONIEFILE_MAX_CHAPTERS);
+     sha1Init(&ctx->sha1);
++    ctx->plan_block = -1; /* no block planned yet (block 0 is valid, so -1 is the sentinel) */
+ 
+     /* open file */
+     ctx->fullPath = fullPath;
+@@ -390,6 +397,93 @@ error_t toniefile_new_chapter(toniefile_t *ctx)
+     {
+         return ERROR_FAILURE;
+     }
++
++    /* Start every chapter on a fresh 4 KB block (Crew's Tonie Cloud fix): finish the partial
++       frame and pad the block with silence, so skipping to a chapter no longer replays the
++       tail (~180 ms) of the previous one. Cost: <=~60 ms of silence. At file creation this is
++       a no-op, because no audio is buffered yet. */
++    opus_int16 silence[OPUS_CHANNELS * OPUS_FRAME_SIZE];
++    osMemset(silence, 0x00, sizeof(silence));
++
++    /* 1. two chapters must never share an Opus frame: finish the partial frame */
++    if (ctx->audio_frame_used > 0)
++    {
++        error_t err = toniefile_encode(ctx, silence, OPUS_FRAME_SIZE - ctx->audio_frame_used);
++        if (err != NO_ERROR)
++        {
++            return err;
++        }
++    }
++
++    /* 2. fill the rest of the current block with silence packet(s) landing exactly on the
++       block boundary (a whole packet that fits, else a minimal one, then re-check) */
++    for (int guard = 0; guard < 8; guard++)
++    {
++        int page_used = (ctx->file_pos % TONIEFILE_FRAME_SIZE) + OGG_HEADER_LENGTH +
++                        ctx->os.lacing_fill - ctx->os.lacing_returned +
++                        ctx->os.body_fill - ctx->os.body_returned;
++        int page_remain = TONIEFILE_FRAME_SIZE - page_used;
++        if ((ctx->os.body_fill - ctx->os.body_returned) <= 0 || page_remain <= 0)
++        {
++            break; /* nothing buffered / already at a boundary */
++        }
++        int payload = (page_remain / 256) * 255 + (page_remain % 256) - 1;
++        int exact = ((payload / 255) + 1 + payload) == page_remain;
++        if (!exact)
++        {
++            payload = OPUS_PACKET_MINSIZE; /* leave an exactly fillable remainder for next pass */
++        }
++        uint8_t pkt[TONIEFILE_FRAME_SIZE];
++        int len = opus_encode(ctx->enc, silence, OPUS_FRAME_SIZE, pkt, payload);
++        if (len <= 0 || opus_packet_pad(pkt, len, payload) < 0)
++        {
++            TRACE_ERROR("Cannot pad chapter silence: %s\r\n", opus_strerror(len < 0 ? len : 0));
++            return ERROR_FAILURE;
++        }
++        ctx->ogg_granule_position += OPUS_FRAME_SIZE;
++        ogg_packet op;
++        op.packet = pkt;
++        op.bytes = payload;
++        op.b_o_s = 0;
++        op.e_o_s = 0;
++        op.granulepos = ctx->ogg_granule_position;
++        op.packetno = ctx->ogg_packet_count++;
++        ogg_stream_packetin(&ctx->os, &op);
++        if (exact)
++        {
++            break;
++        }
++    }
++
++    /* 3. flush the completed block(s) so the new chapter begins on a fresh block */
++    ogg_page og;
++    while (ogg_stream_flush(&ctx->os, &og))
++    {
++        if (fsWriteFile(ctx->file, og.header, og.header_len) != NO_ERROR)
++        {
++            return ERROR_FAILURE;
++        }
++        if (fsWriteFile(ctx->file, og.body, og.body_len) != NO_ERROR)
++        {
++            return ERROR_FAILURE;
++        }
++        size_t prev = ctx->file_pos;
++        ctx->file_pos += og.header_len + og.body_len;
++        ctx->audio_length += og.header_len + og.body_len;
++        sha1Update(&ctx->sha1, og.header, og.header_len);
++        sha1Update(&ctx->sha1, og.body, og.body_len);
++        if ((prev / TONIEFILE_FRAME_SIZE) != (ctx->file_pos / TONIEFILE_FRAME_SIZE))
++        {
++            ctx->taf_block_num++;
++            if (ctx->file_pos % TONIEFILE_FRAME_SIZE)
++            {
++                TRACE_ERROR("Block alignment mismatch after chapter 0x%08" PRIX32 "\r\n", (uint32_t)ctx->file_pos);
++                return ERROR_FAILURE;
++            }
++        }
++    }
++    ctx->plan_block = -1; /* force a fresh block plan for the new chapter */
++
+     ctx->taf.track_page_nums[ctx->taf.n_track_page_nums++] = ctx->taf_block_num;
+     TRACE_INFO("new chapter at 0x%08" PRIX32 "\r\n", (uint32_t)ctx->taf_block_num);
+ 
+@@ -440,6 +534,54 @@ error_t toniefile_encode(toniefile_t *ctx, int16_t *sample_buffer, size_t sample
+                 return ERROR_FAILURE;
+             }
+ 
++            /* Even-split page planning (Crew's Tonie Cloud fix): plan the block on its first
++               frame so every frame gets an equal share of the 4 KB, then cap this frame to
++               its share. The last planned frame keeps the full remaining space and is padded
++               to fill the block below, so block alignment and file size are unchanged. */
++            bool fill_block = false;
++            {
++                if ((int)ctx->taf_block_num != ctx->plan_block)
++                {
++                    int nat = get_settings()->encode.bitrate * 1000 / 8 * 60 / 1000; /* target bytes / 60 ms frame */
++                    int per = nat + nat / 255 + 1;                                    /* + its Ogg lacing bytes */
++                    if (per < OPUS_PACKET_MINSIZE + 2)
++                    {
++                        per = OPUS_PACKET_MINSIZE + 2;
++                    }
++                    ctx->plan_block = (int)ctx->taf_block_num;
++                    ctx->plan_used = 0;
++                    ctx->plan_total = page_remain / per;
++                    if (page_remain - ctx->plan_total * per >= OPUS_PACKET_MINSIZE + 2)
++                    {
++                        ctx->plan_total++;
++                    }
++                    if (ctx->plan_total < 1)
++                    {
++                        ctx->plan_total = 1;
++                    }
++                }
++                int left = ctx->plan_total - ctx->plan_used;
++                if (left <= 1)
++                {
++                    fill_block = true; /* last planned frame fills the block */
++                }
++                else
++                {
++                    int share = page_remain / left;
++                    int pay = share - (share / 256 + 1);
++                    int rest = page_remain - (pay + pay / 255 + 1);
++                    if (rest % 256 == 0)
++                    {
++                        pay--; /* keep the remainder exactly fillable */
++                    }
++                    if (pay >= OPUS_PACKET_MINSIZE - 1 && pay < frame_payload)
++                    {
++                        frame_payload = pay;
++                    }
++                }
++                ctx->plan_used++;
++            }
++
+             int frame_len = opus_encode(ctx->enc, ctx->audio_frame, OPUS_FRAME_SIZE, output_frame, frame_payload);
+             // TRACE_INFO("opus_encode: %d/%d\r\n", frame_len, frame_payload);
+ 
+@@ -478,8 +620,9 @@ error_t toniefile_encode(toniefile_t *ctx, int16_t *sample_buffer, size_t sample
+                 frame_len = min_payload;
+             }
+ 
+-            /* we did not exactly hit the destination size and are close to block size. pad packet */
+-            if (frame_payload - frame_len < OPUS_PACKET_PAD)
++            /* we did not exactly hit the destination size and are close to block size. pad packet.
++               fill_block forces the last planned frame to fill the block (even-split fix). */
++            if (fill_block || frame_payload - frame_len < OPUS_PACKET_PAD)
+             {
+                 int target_length = frame_payload;
+ 
+@@ -577,6 +720,110 @@ bool toniefile_is_valid(const char *file_path)
+     return is_valid;
+ }
+ 
++#if defined(FFMPEG_DECODING) && !defined(_WIN32)
++/* Crew's Tonie Cloud: run ffmpeg without a shell.
++ *
++ * Upstream builds a command string and hands it to popen(), which runs it through /bin/sh.
++ * A source path containing a quote or a shell metacharacter would then break the command or
++ * inject into it. Here ffmpeg is fork/exec'd directly with an argument vector, so the path is
++ * passed verbatim and never interpreted. The child pid is tracked so _end() can reap it. */
++#include <unistd.h>
++#include <fcntl.h>
++#include <sys/wait.h>
++#include <pthread.h>
++#include <errno.h>
++
++#define FFMPEG_MAX_PIPES 64
++static struct
++{
++    int fd;
++    pid_t pid;
++} ffmpeg_pids[FFMPEG_MAX_PIPES];
++static pthread_mutex_t ffmpeg_pids_lock = PTHREAD_MUTEX_INITIALIZER;
++
++static void ffmpeg_pid_store(int fd, pid_t pid)
++{
++    pthread_mutex_lock(&ffmpeg_pids_lock);
++    for (int i = 0; i < FFMPEG_MAX_PIPES; i++)
++    {
++        if (ffmpeg_pids[i].pid == 0)
++        {
++            ffmpeg_pids[i].fd = fd;
++            ffmpeg_pids[i].pid = pid;
++            break;
++        }
++    }
++    pthread_mutex_unlock(&ffmpeg_pids_lock);
++}
++
++static pid_t ffmpeg_pid_take(int fd)
++{
++    pid_t pid = 0;
++    pthread_mutex_lock(&ffmpeg_pids_lock);
++    for (int i = 0; i < FFMPEG_MAX_PIPES; i++)
++    {
++        if (ffmpeg_pids[i].pid != 0 && ffmpeg_pids[i].fd == fd)
++        {
++            pid = ffmpeg_pids[i].pid;
++            ffmpeg_pids[i].pid = 0;
++            break;
++        }
++    }
++    pthread_mutex_unlock(&ffmpeg_pids_lock);
++    return pid;
++}
++
++/* fork/exec ffmpeg with argv (no shell). If in_fd >= 0 it becomes ffmpeg's stdin (used for the
++   byte-skip path). Returns a FILE* reading ffmpeg's stdout, or NULL. Between fork and exec only
++   async-signal-safe calls are used, which is required in this multithreaded server. */
++static FILE *ffmpeg_spawn(char *const argv[], int in_fd)
++{
++    int pipefd[2];
++    if (pipe(pipefd) != 0)
++    {
++        if (in_fd >= 0)
++            close(in_fd);
++        return NULL;
++    }
++    pid_t pid = fork();
++    if (pid < 0)
++    {
++        close(pipefd[0]);
++        close(pipefd[1]);
++        if (in_fd >= 0)
++            close(in_fd);
++        return NULL;
++    }
++    if (pid == 0)
++    {
++        /* child: wire stdout (and optionally stdin), then exec */
++        dup2(pipefd[1], STDOUT_FILENO);
++        if (in_fd >= 0)
++            dup2(in_fd, STDIN_FILENO);
++        close(pipefd[0]);
++        close(pipefd[1]);
++        if (in_fd >= 0)
++            close(in_fd);
++        execvp("ffmpeg", argv);
++        _exit(127); /* exec failed */
++    }
++    /* parent */
++    close(pipefd[1]);
++    if (in_fd >= 0)
++        close(in_fd);
++    FILE *f = fdopen(pipefd[0], "r");
++    if (f == NULL)
++    {
++        close(pipefd[0]);
++        int status;
++        waitpid(pid, &status, 0);
++        return NULL;
++    }
++    ffmpeg_pid_store(fileno(f), pid);
++    return f;
++}
++#endif
++
+ // Function to decode audio from FFmpeg's standard output
+ FILE *ffmpeg_decode_audio_start(const char *input_source)
+ {
+@@ -585,30 +832,97 @@ FILE *ffmpeg_decode_audio_start(const char *input_source)
+ 
+ FILE *ffmpeg_decode_audio_start_skip(const char *input_source, size_t skip_seconds, size_t skip_bytes)
+ {
+-#ifdef FFMPEG_DECODING
++#if defined(FFMPEG_DECODING) && !defined(_WIN32)
+     TRACE_INFO("Start ffmpeg for decoding...\r\n");
+ 
+-    // Construct the FFmpeg command based on the input source
+-    char ffmpeg_command[1024]; // Adjust the buffer size as needed
++    settings_t *settings = get_settings();
++    bool normalize = settings->encode.normalize;
++    const char *norm_filter = settings->encode.normalize_filter;
++    if (norm_filter == NULL || norm_filter[0] == '\0')
++    {
++        normalize = false;
++    }
++
++    /* the byte-skip path (continuing a TAF/stream) feeds ffmpeg from an lseek'd fd instead of
++       the shell "tail -c +N file | ffmpeg -i -" pipeline */
++    int in_fd = -1;
++    const char *input = input_source;
++    if (skip_bytes > 0)
++    {
++        in_fd = open(input_source, O_RDONLY);
++        if (in_fd < 0)
++        {
++            TRACE_ERROR("Could not open %s for skipping\r\n", input_source);
++            return NULL;
++        }
++        if (lseek(in_fd, (off_t)skip_bytes, SEEK_SET) == (off_t)-1)
++        {
++            TRACE_ERROR("Could not seek %s to %" PRIuSIZE "\r\n", input_source, skip_bytes);
++            close(in_fd);
++            return NULL;
++        }
++        input = "-";
++    }
++
++    char ss[32];
++    osSnprintf(ss, sizeof(ss), "%" PRIuSIZE, skip_seconds);
++
++    char *argv[24];
++    int n = 0;
++    argv[n++] = "ffmpeg";
++    argv[n++] = "-i";
++    argv[n++] = (char *)input;
++    if (normalize)
++    {
++        argv[n++] = "-af";
++        argv[n++] = (char *)norm_filter;
++    }
++    argv[n++] = "-f";
++    argv[n++] = "s16le";
++    argv[n++] = "-acodec";
++    argv[n++] = "pcm_s16le";
++    argv[n++] = "-ar";
++    argv[n++] = "48000";
++    argv[n++] = "-ac";
++    argv[n++] = "2";
++    argv[n++] = "-ss";
++    argv[n++] = ss;
++    argv[n++] = "-";
++    argv[n] = NULL;
++
++    TRACE_INFO("ffmpeg decode: input='%s' skip_bytes=%" PRIuSIZE " skip_seconds=%" PRIuSIZE " normalize=%d\r\n",
++               input, skip_bytes, skip_seconds, normalize);
++
++    FILE *ffmpeg_pipe = ffmpeg_spawn(argv, in_fd);
++    if (ffmpeg_pipe == NULL)
++    {
++        TRACE_ERROR("Could not start ffmpeg\r\n");
++    }
++    return ffmpeg_pipe;
++#elif defined(FFMPEG_DECODING)
++    /* Windows: keep the shell-based path (not the target deployment) */
++    TRACE_INFO("Start ffmpeg for decoding...\r\n");
++    settings_t *settings = get_settings();
++    const char *norm_filter = settings->encode.normalize_filter;
++    char af[256] = "";
++    if (settings->encode.normalize && norm_filter != NULL && norm_filter[0] != '\0')
++    {
++        snprintf(af, sizeof(af), "-af \"%s\" ", norm_filter);
++    }
++    char ffmpeg_command[1024];
+     if (skip_bytes == 0)
+     {
+-        snprintf(ffmpeg_command, sizeof(ffmpeg_command), "ffmpeg -i \"%s\" -f s16le -acodec pcm_s16le -ar 48000 -ac 2 -ss %" PRIuSIZE " -", input_source, skip_seconds);
++        snprintf(ffmpeg_command, sizeof(ffmpeg_command), "ffmpeg -i \"%s\" %s-f s16le -acodec pcm_s16le -ar 48000 -ac 2 -ss %" PRIuSIZE " -", input_source, af, skip_seconds);
+     }
+     else
+     {
+-        snprintf(ffmpeg_command, sizeof(ffmpeg_command), "tail -c +%" PRIuSIZE " \"%s\" | ffmpeg -i - -f s16le -acodec pcm_s16le -ar 48000 -ac 2 -ss %" PRIuSIZE " -", skip_bytes + 1, input_source, skip_seconds);
++        snprintf(ffmpeg_command, sizeof(ffmpeg_command), "tail -c +%" PRIuSIZE " \"%s\" | ffmpeg -i - %s-f s16le -acodec pcm_s16le -ar 48000 -ac 2 -ss %" PRIuSIZE " -", skip_bytes + 1, input_source, af, skip_seconds);
+     }
+-
+     TRACE_INFO("FFmpeg command: %s\r\n", ffmpeg_command);
+-
+-    FILE *ffmpeg_pipe = NULL;
+-
+-    // Open a pipe to execute the FFmpeg command
+-    ffmpeg_pipe = osPopen(ffmpeg_command, "r");
++    FILE *ffmpeg_pipe = osPopen(ffmpeg_command, "r");
+     if (ffmpeg_pipe == NULL)
+     {
+         TRACE_ERROR("Could not open FFmpeg pipe\n");
+-        return ffmpeg_pipe;
+     }
+     return ffmpeg_pipe;
+ #else
+@@ -618,41 +932,30 @@ FILE *ffmpeg_decode_audio_start_skip(const char *input_source, size_t skip_secon
+ 
+ error_t ffmpeg_decode_audio_end(FILE *ffmpeg_pipe, error_t error)
+ {
+-#ifdef FFMPEG_DECODING
++#if defined(FFMPEG_DECODING) && !defined(_WIN32)
++    (void)error;
+     if (ffmpeg_pipe == NULL)
+         return ERROR_ABORTED;
+-    /*
+-    char line[1024]; // Adjust the buffer size as needed
+-    if (error == NO_ERROR)
+-    {
+-        TRACE_INFO("%s", "");
+-    }
+-    else
++    pid_t pid = ffmpeg_pid_take(fileno(ffmpeg_pipe));
++    fclose(ffmpeg_pipe);
++    int status = 0;
++    int error_code = -1;
++    if (pid > 0)
+     {
+-        TRACE_ERROR("%s", "");
+-    }
+-    while (fgets(line, sizeof(line), ffmpeg_pipe) != NULL)
+-    {
+-        if (error == NO_ERROR)
+-        {
+-            TRACE_INFO_RESUME("%s", (const char *)line);
+-        }
+-        else
++        while (waitpid(pid, &status, 0) < 0 && errno == EINTR)
+         {
+-            TRACE_ERROR_RESUME("%s", (const char *)line);
++            /* retry */
+         }
++        error_code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+     }
+-    if (error == NO_ERROR)
+-    {
+-        TRACE_INFO_RESUME("%s", "\r\n");
+-    }
+-    else
+-    {
+-        TRACE_ERROR_RESUME("%s", "\r\n");
+-    }*/
+-    // Close the FFmpeg pipe
++    TRACE_INFO("Stopped ffmpeg with code=%i...\r\n", error_code);
++    if (error_code == 0)
++        return NO_ERROR;
++    return ERROR_ABORTED;
++#elif defined(FFMPEG_DECODING)
++    if (ffmpeg_pipe == NULL)
++        return ERROR_ABORTED;
+     int error_code = osPclose(ffmpeg_pipe);
+-
+     TRACE_INFO("Stopped ffmpeg with code=%i...\r\n", error_code);
+     if (error_code == 0)
+         return NO_ERROR;

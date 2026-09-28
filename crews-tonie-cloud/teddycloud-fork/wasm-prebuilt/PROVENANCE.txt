@@ -1,0 +1,1 @@
+built from base 78c3b38e36f665d3a5fffe907f73a02725176377 + patch 0002 (wasm/taf_encoder_minimal.c) with emscripten releases-772bb4648be4a897ca062d6adc65bc70223d2703-64bit

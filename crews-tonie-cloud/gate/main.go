@@ -42,6 +42,27 @@ func envOr(k, d string) string {
 	return d
 }
 
+func envInt(k string, d int) int {
+	if v := os.Getenv(k); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return d
+}
+
+func envDur(k string, d time.Duration) time.Duration {
+	if v := os.Getenv(k); v != "" {
+		if p, err := time.ParseDuration(v); err == nil && p > 0 {
+			return p
+		}
+	}
+	return d
+}
+
+// loginLimiter throttles password guessing; configured in main.
+var loginLimiter = newLimiter(10, 15*time.Minute, 30*time.Second, 15*time.Minute)
+
 // token is "<expiry unix seconds>.<hex HMAC-SHA256 of that number>"
 func mint(exp int64) string {
 	msg := strconv.FormatInt(exp, 10)
@@ -93,6 +114,13 @@ func main() {
 		log.Print("GATE_SECRET is not set; using a random one. Logins will not survive a restart — set GATE_SECRET to keep them.")
 	}
 
+	loginLimiter = newLimiter(
+		envInt("GATE_MAX_FAILS", 10),
+		envDur("GATE_WINDOW", 15*time.Minute),
+		envDur("GATE_LOCKOUT", 30*time.Second),
+		envDur("GATE_LOCKOUT_MAX", 15*time.Minute),
+	)
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/__gate/health", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) })
 	mux.HandleFunc("/__gate/verify", handleVerify)
@@ -124,7 +152,16 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 	next := safeNext(r.URL.Query().Get("next"))
 	if r.Method == http.MethodPost {
 		next = safeNext(r.FormValue("next"))
+		// Too many recent failures: refuse without even checking the password.
+		if d := loginLimiter.retryAfter(); d > 0 {
+			log.Printf("login blocked (rate limit, %s left) from %s", d.Round(time.Second), clientIP(r))
+			retryAfterHeader(w, d)
+			w.WriteHeader(http.StatusTooManyRequests)
+			render(w, next, true, d)
+			return
+		}
 		if subtle.ConstantTimeCompare([]byte(r.FormValue("password")), []byte(password)) == 1 {
+			loginLimiter.success()
 			exp := time.Now().Add(ttl)
 			http.SetCookie(w, &http.Cookie{
 				Name: cookieName, Value: mint(exp.Unix()), Path: "/",
@@ -133,15 +170,26 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 			http.Redirect(w, r, next, http.StatusFound)
 			return
 		}
+		if loginLimiter.fail() {
+			log.Printf("login failed from %s — too many attempts, locking out", clientIP(r))
+		} else {
+			log.Printf("login failed from %s", clientIP(r))
+		}
+		if d := loginLimiter.retryAfter(); d > 0 {
+			retryAfterHeader(w, d)
+			w.WriteHeader(http.StatusTooManyRequests)
+			render(w, next, true, d)
+			return
+		}
 		w.WriteHeader(http.StatusUnauthorized)
-		render(w, next, true)
+		render(w, next, true, 0)
 		return
 	}
 	if authed(r) {
 		http.Redirect(w, r, next, http.StatusFound)
 		return
 	}
-	render(w, next, false)
+	render(w, next, false, 0)
 }
 
 func handleLogout(w http.ResponseWriter, r *http.Request) {
@@ -149,9 +197,13 @@ func handleLogout(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/__gate/login", http.StatusFound)
 }
 
-func render(w http.ResponseWriter, next string, failed bool) {
+func render(w http.ResponseWriter, next string, failed bool, lockedFor time.Duration) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	page.Execute(w, map[string]any{"Brand": brand, "Tagline": tagline, "Next": next, "Failed": failed})
+	locked := ""
+	if lockedFor > 0 {
+		locked = strconv.Itoa(int(lockedFor.Round(time.Second).Seconds()))
+	}
+	page.Execute(w, map[string]any{"Brand": brand, "Tagline": tagline, "Next": next, "Failed": failed, "Locked": locked})
 }
 
 var page = template.Must(template.New("login").Parse(`<!doctype html>
@@ -198,7 +250,7 @@ var page = template.Must(template.New("login").Parse(`<!doctype html>
     </div>
     <h1>{{.Brand}}</h1>
     <div class="tag">{{.Tagline}}</div>
-    {{if .Failed}}<div class="err">That password didn’t match. Try again.</div>{{end}}
+    {{if .Locked}}<div class="err">Too many attempts. Please wait about {{.Locked}} seconds and try again.</div>{{else if .Failed}}<div class="err">That password didn’t match. Try again.</div>{{end}}
     <label for="password">Password</label>
     <input id="password" name="password" type="password" autocomplete="current-password" autofocus required>
     <input type="hidden" name="next" value="{{.Next}}">

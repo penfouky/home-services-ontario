@@ -1,0 +1,45 @@
+# Log limits + health checks for the Crew's Tonie Cloud stack.
+#
+# Merge these into your real compose file (service names must match yours). With Docker Compose you
+# can keep them separate and layer them on:
+#
+#   docker compose -f compose.private.yml -f ops/compose.override.example.yml up -d
+#
+# Two things it adds:
+#  1. Log rotation. Docker's default json-file driver grows forever and will eventually fill a small
+#     VPS disk. These caps keep at most ~30 MB of logs per service.
+#  2. Health checks, so `docker ps` and the watchdog can tell when a service is actually up.
+#
+# VERSION PINNING: pin TeddyCloud to a specific tag instead of :latest so updates only happen when
+# you choose. Replace the image below with the exact tag you deploy (your fork's image, or an
+# upstream tag like ghcr.io/toniebox-reverse-engineering/teddycloud:tc_v0.6.x). Avoid :latest.
+
+services:
+  teddycloud:
+    # image: ghcr.io/<your-fork>/teddycloud:<pinned-tag>   # <- pin this; do not use :latest
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+    healthcheck:
+      # adjust the port/path to your setup; the web UI listens on 80 inside the container
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:80/ >/dev/null || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  gate:
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/__gate/health >/dev/null 2>&1 || exit 1"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  caddy:
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }

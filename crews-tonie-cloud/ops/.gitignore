@@ -1,0 +1,6 @@
+# secrets and runtime state — never commit these
+.env
+*.passphrase
+.last-backup-ok
+.watchdog-state
+backups/
