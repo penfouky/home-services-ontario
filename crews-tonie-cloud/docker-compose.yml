@@ -49,7 +49,12 @@ services:
       - "8080"
 
   caddy:
-    image: caddy:2-alpine
+    # Built from the official image plus the replace-response plugin, so Caddy can
+    # inject the Colada Builds theme into TeddyCloud's HTML. See theme/caddy.Dockerfile.
+    build:
+      context: .
+      dockerfile: theme/caddy.Dockerfile
+    image: crews-tonie-cloud/caddy
     container_name: ctc-caddy
     hostname: caddy
     restart: unless-stopped
@@ -62,6 +67,7 @@ services:
       - ACME_EMAIL=${ACME_EMAIL:?set ACME_EMAIL in .env}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./theme/web:/srv/colada:ro   # Colada Builds theme assets, served at /colada/*
       - caddy_data:/data
       - caddy_config:/config
 
